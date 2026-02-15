@@ -1,8 +1,8 @@
-# Implementation Plan: TuneForge
+# Implementation Plan: Modifai
 
 ## Overview
 
-This implementation plan breaks down the TuneForge platform into discrete, incremental coding tasks. The approach follows the pipeline architecture: document ingestion → chunking → intent selection → generation → curation → export → fine-tuning → comparison → deployment. Each task builds on previous work, with testing integrated throughout to validate functionality early.
+This implementation plan breaks down the Modifai platform into discrete, incremental coding tasks. The approach follows the pipeline architecture: document ingestion → chunking → intent selection → generation → curation → export → fine-tuning → comparison → deployment. Each task builds on previous work, with testing integrated throughout to validate functionality early.
 
 The implementation uses Python with FastAPI for the backend, React for the frontend, and leverages the Hugging Face ecosystem (Transformers, PEFT) for LLM operations.
 

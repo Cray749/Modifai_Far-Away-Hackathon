@@ -1,12 +1,12 @@
-# Requirements Document: TuneForge
+# Requirements Document: Modifai
 
 ## Introduction
 
-TuneForge is a no-code platform that automates end-to-end LLM fine-tuning pipeline creation, focusing on high-quality instruction dataset generation from raw documents. The platform enables users without deep ML expertise to customize language models for domain-specific tasks through an intuitive interface that handles document ingestion, intelligent chunking, instruction generation, dataset creation, LoRA-based fine-tuning, and model comparison.
+Modifai is a no-code platform that automates end-to-end LLM fine-tuning pipeline creation, focusing on high-quality instruction dataset generation from raw documents. The platform enables users without deep ML expertise to customize language models for domain-specific tasks through an intuitive interface that handles document ingestion, intelligent chunking, instruction generation, dataset creation, LoRA-based fine-tuning, and model comparison.
 
 ## Glossary
 
-- **System**: The TuneForge platform
+- **System**: The Modifai platform
 - **User**: A person interacting with the platform (AI consultant, technical founder, or advanced user)
 - **Document**: A file uploaded by the user (PDF, TXT, or DOCX format)
 - **Chunk**: A semantically meaningful segment of text extracted from a document

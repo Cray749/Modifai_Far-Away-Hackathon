@@ -1,8 +1,8 @@
-# Design Document: TuneForge
+# Design Document: Modifai
 
 ## Overview
 
-TuneForge is a no-code platform that democratizes LLM fine-tuning by automating the most challenging aspect: high-quality instruction dataset generation from raw documents. The system follows a linear pipeline architecture where each stage transforms data for the next: document ingestion → intelligent chunking → intent-driven instruction generation → dataset curation → LoRA fine-tuning → model comparison.
+Modifai is a no-code platform that democratizes LLM fine-tuning by automating the most challenging aspect: high-quality instruction dataset generation from raw documents. The system follows a linear pipeline architecture where each stage transforms data for the next: document ingestion → intelligent chunking → intent-driven instruction generation → dataset curation → LoRA fine-tuning → model comparison.
 
 The design prioritizes simplicity and demo impact for an MVP that can be built in 48-72 hours while maintaining modularity for future enhancements. The architecture separates concerns into distinct processing stages, allowing each component to be developed, tested, and improved independently.
 
@@ -322,7 +322,7 @@ class JSONLExporter:
 1. Retrieve all training examples for session
 2. Format each example as single-line JSON
 3. Join with newlines
-4. Generate filename: `tuneforge_dataset_{timestamp}.jsonl`
+4. Generate filename: `modifai_dataset_{timestamp}.jsonl`
 5. Return file content for download
 
 ### 7. LoRA Fine-tuning Pipeline
@@ -649,7 +649,7 @@ Property 19: JSONL export completeness
 **Validates: Requirements 6.4**
 
 Property 20: Export filename format
-*For any* dataset export, the filename should match the pattern "tuneforge_dataset_{timestamp}.jsonl".
+*For any* dataset export, the filename should match the pattern "modifai_dataset_{timestamp}.jsonl".
 **Validates: Requirements 6.6**
 
 Property 21: Model selection persistence
@@ -818,7 +818,7 @@ def generate_dataset(chunks: List[Chunk], intent: Intent) -> List[TrainingExampl
 
 ### Dual Testing Approach
 
-TuneForge requires both unit tests and property-based tests for comprehensive coverage:
+Modifai requires both unit tests and property-based tests for comprehensive coverage:
 
 **Unit Tests** focus on:
 - Specific examples of correct behavior
@@ -853,7 +853,7 @@ Each property-based test must include a comment referencing its design property:
 @given(st.text(min_size=100), st.sampled_from(["pdf", "txt", "docx"]))
 def test_document_extraction_roundtrip(content: str, format: str):
     """
-    Feature: tuneforge, Property 1: Document extraction round-trip
+    Feature: modifai, Property 1: Document extraction round-trip
     For any supported document format and text content, extracting text 
     from a document should return equivalent text.
     """
