@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     CORS_ORIGINS: list[str] = [
         "http://localhost:5173",
         "http://localhost:3000",
+        "https://modifai.advitya-dua.dev",
     ]
 
     # Secrets
