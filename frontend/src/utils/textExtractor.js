@@ -7,10 +7,8 @@ import * as pdfjsLib from 'pdfjs-dist'
 import mammoth from 'mammoth'
 
 // Point pdf.js at the bundled worker
-pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-    'pdfjs-dist/build/pdf.worker.mjs',
-    import.meta.url,
-).toString()
+import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.mjs?url'
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl
 
 const SAMPLE_CHARS = 2000
 
