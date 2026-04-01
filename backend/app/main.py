@@ -41,6 +41,18 @@ def create_app() -> FastAPI:
     # Mount versioned API
     app.include_router(v1_router, prefix=settings.API_V1_PREFIX)
 
+    from starlette.middleware.base import BaseHTTPMiddleware
+    class DebugMiddleware(BaseHTTPMiddleware):
+        async def dispatch(self, request, call_next):
+            print(f"DEBUG [Middleware]: Received {request.method} {request.url}")
+            print(f"DEBUG [Middleware]: Headers: Origin={request.headers.get('origin', 'N/A')}, "
+                  f"Access-Control-Request-Method={request.headers.get('access-control-request-method', 'N/A')}")
+            response = await call_next(request)
+            print(f"DEBUG [Middleware]: Response Status: {response.status_code}")
+            return response
+
+    app.add_middleware(DebugMiddleware)
+
     return app
 
 

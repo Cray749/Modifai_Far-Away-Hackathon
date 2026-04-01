@@ -190,7 +190,11 @@ Respond ONLY with a valid JSON object in this exact format:
             }
         except Exception as e:
             logger.error(f"Error calling Bedrock for evaluation: {e}")
-            return {"score": 0.0, "error": str(e)}
+            return {
+                "score": 0.0, 
+                "explanation": "Failed to evaluate text sample due to an internal error.", 
+                "error": str(e)
+            }
 
     @staticmethod
     def get_generated_dataset(s3_prefix: str) -> list[dict]:
