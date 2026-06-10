@@ -34,6 +34,7 @@ from typing import Dict, List, Optional, Any
 from modifai.core.text_extraction import extract_text_from_file
 from modifai.core.chunking import chunk_text
 from modifai.agents.pipeline_loop import run_agentic_loop
+from modifai.agents.training_agent import TrainingAgent
 from modifai.core.formatter import format_and_upload_to_s3
 from modifai.core.finetuning import start_finetuning_job, wait_for_job, list_supported_models
 from modifai.core.deployment import provision_model
@@ -52,6 +53,7 @@ def run_full_pipeline(
     role_arn: str,
     custom_model_name: str,
     base_model_id: str = "titan-text-express",
+    use_sagemaker: bool = False,
     doc_domain: str = "general",
     max_iterations: int = 3,
     job_id: Optional[str] = None,
@@ -68,9 +70,15 @@ def run_full_pipeline(
         s3_bucket:          S3 bucket for training data and model output (must be in us-east-1).
         role_arn:           IAM role ARN with AmazonBedrockFullAccess and S3 access.
         custom_model_name:  Name for the fine-tuned model (alphanumeric + hyphens).
-        base_model_id:      Base model to fine-tune on. Can be a short key from
-                            list_supported_models() (e.g. "nova-lite", "llama3-8b")
-                            or a full Bedrock model ID string. Default: "titan-text-express".
+        base_model_id:      Base model to fine-tune on.
+                            - If use_sagemaker=True: short key from TrainingAgent.list_supported_models()
+                              (e.g. "llama3-8b", "mistral-7b") or a full HuggingFace model ID.
+                            - If use_sagemaker=False: short key from finetuning.list_supported_models()
+                              (e.g. "nova-lite", "titan-text-express") or a full Bedrock model ID.
+        use_sagemaker:      If True, fine-tunes using SageMaker + HuggingFace DLC (supports
+                            open-weight models like Llama 3, Mistral, Phi-3).
+                            If False (default), uses Bedrock model customisation API
+                            (faster, managed, supports Titan/Nova models).
         doc_domain:         Document domain (e.g. "HR policy", "engineering runbook").
         max_iterations:     Max Critic→Curriculum loop iterations (default 3).
         job_id:             Unique run ID for S3 paths. Auto-generated if not provided.
@@ -172,19 +180,43 @@ def run_full_pipeline(
     logger.info("      Training data: %s", training_s3_uri)
 
     # ── Step 5: Fine-Tuning ───────────────────────────────────────────────────
-    logger.info("[5/6] Starting Bedrock fine-tuning job...")
-    ft_job_name = start_finetuning_job(
-        training_data_s3_uri=training_s3_uri,
-        output_s3_uri=output_s3_uri,
-        custom_model_name=custom_model_name,
-        role_arn=role_arn,
-        base_model_id=base_model_id,
-        region=region,
-    )
-    logger.info("      Fine-tuning job: %s (this takes 30–90 minutes...)", ft_job_name)
-
-    custom_model_arn = wait_for_job(ft_job_name, region=region)
-    logger.info("      Fine-tuning complete! Model ARN: %s", custom_model_arn)
+    if use_sagemaker:
+        # ── SageMaker path (open-weight models: Llama, Mistral, Phi-3, etc.) ──
+        logger.info("[5/6] Starting SageMaker fine-tuning job (TrainingAgent)...")
+        training_agent = TrainingAgent(
+            role_arn=role_arn,
+            s3_bucket=s3_bucket,
+            base_model_id=base_model_id,
+            region=region,
+        )
+        train_result = training_agent.run(
+            samples=final_samples,
+            dataset_stats=loop_state["final_stats"],
+            job_id=job_id,
+            custom_model_name=custom_model_name,
+        )
+        ft_job_name = train_result["job_name"]
+        training_s3_uri = train_result["dataset_s3_uri"]
+        # SageMaker produces model artifacts in S3, not a Bedrock model ARN
+        custom_model_arn = train_result.get("model_s3_uri")  # S3 URI of model.tar.gz
+        logger.info(
+            "      SageMaker training complete! Status: %s, artifacts: %s",
+            train_result["status"], custom_model_arn,
+        )
+    else:
+        # ── Bedrock Customisation path (Titan, Nova models) ───────────────────
+        logger.info("[5/6] Starting Bedrock fine-tuning job...")
+        ft_job_name = start_finetuning_job(
+            training_data_s3_uri=training_s3_uri,
+            output_s3_uri=output_s3_uri,
+            custom_model_name=custom_model_name,
+            role_arn=role_arn,
+            base_model_id=base_model_id,
+            region=region,
+        )
+        logger.info("      Fine-tuning job: %s (this takes 30–90 minutes...)", ft_job_name)
+        custom_model_arn = wait_for_job(ft_job_name, region=region)
+        logger.info("      Fine-tuning complete! Model ARN: %s", custom_model_arn)
 
     # ── Step 6: Deployment ────────────────────────────────────────────────────
     logger.info("[6/6] Provisioning model endpoint...")
