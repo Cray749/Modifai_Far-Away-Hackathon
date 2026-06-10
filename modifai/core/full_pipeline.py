@@ -35,13 +35,14 @@ from modifai.core.text_extraction import extract_text_from_file
 from modifai.core.chunking import chunk_text
 from modifai.agents.pipeline_loop import run_agentic_loop
 from modifai.core.formatter import format_and_upload_to_s3
-from modifai.core.finetuning import start_finetuning_job, wait_for_job
+from modifai.core.finetuning import start_finetuning_job, wait_for_job, list_supported_models
 from modifai.core.deployment import provision_model
 from modifai.core.inference import batch_query
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_REGION = os.environ.get("AWS_REGION", "us-east-1")
+_DEFAULT_REGION = os.environ.get("AWS_REGION", "ap-southeast-2")
+_DEFAULT_BUCKET = os.environ.get("S3_BUCKET_NAME", "modifai-newbucket")
 
 
 def run_full_pipeline(
@@ -50,6 +51,7 @@ def run_full_pipeline(
     s3_bucket: str,
     role_arn: str,
     custom_model_name: str,
+    base_model_id: str = "titan-text-express",
     doc_domain: str = "general",
     max_iterations: int = 3,
     job_id: Optional[str] = None,
@@ -66,6 +68,9 @@ def run_full_pipeline(
         s3_bucket:          S3 bucket for training data and model output (must be in us-east-1).
         role_arn:           IAM role ARN with AmazonBedrockFullAccess and S3 access.
         custom_model_name:  Name for the fine-tuned model (alphanumeric + hyphens).
+        base_model_id:      Base model to fine-tune on. Can be a short key from
+                            list_supported_models() (e.g. "nova-lite", "llama3-8b")
+                            or a full Bedrock model ID string. Default: "titan-text-express".
         doc_domain:         Document domain (e.g. "HR policy", "engineering runbook").
         max_iterations:     Max Critic→Curriculum loop iterations (default 3).
         job_id:             Unique run ID for S3 paths. Auto-generated if not provided.
@@ -173,6 +178,7 @@ def run_full_pipeline(
         output_s3_uri=output_s3_uri,
         custom_model_name=custom_model_name,
         role_arn=role_arn,
+        base_model_id=base_model_id,
         region=region,
     )
     logger.info("      Fine-tuning job: %s (this takes 30–90 minutes...)", ft_job_name)

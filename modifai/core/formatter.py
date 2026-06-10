@@ -32,7 +32,7 @@ import boto3
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_REGION = os.environ.get("AWS_REGION", "us-east-1")
+_DEFAULT_REGION = os.environ.get("AWS_REGION", "ap-southeast-2")
 
 
 def format_and_upload_to_s3(

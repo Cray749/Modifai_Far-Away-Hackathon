@@ -71,7 +71,7 @@ def generate_dataset(
         List of sample dicts: {instruction, input, output, chunk_id}
     """
     model_id = os.environ.get("AWS_MODEL_ID", "amazon.nova-micro-v1:0")
-    region = os.environ.get("AWS_REGION", "us-east-1")
+    region = os.environ.get("AWS_REGION", "ap-southeast-2")
     client = boto3.client("bedrock-runtime", region_name=region)
 
     base_prompt = _BASE_SYSTEM_PROMPTS.get(mode, _BASE_SYSTEM_PROMPTS["QA"])

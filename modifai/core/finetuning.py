@@ -1,22 +1,27 @@
 """
 finetuning.py — Starts and monitors an AWS Bedrock model customization (fine-tuning) job.
 
-Uses the Bedrock fine-tuning API to fine-tune amazon.titan-text-express-v1
-on the generated training dataset.
+Supports any model in SUPPORTED_FINETUNE_MODELS (see below), giving the user
+full freedom to choose which base model to fine-tune on their dataset.
 
 Prerequisites:
-  - S3 bucket in the same region as Bedrock (us-east-1)
+  - S3 bucket in the same region as Bedrock
   - IAM role with permissions: AmazonBedrockFullAccess + S3 read access
   - Minimum 50 training samples (Bedrock requirement for fine-tuning)
 
 Usage:
-    from modifai.core.finetuning import start_finetuning_job, wait_for_job
+    from modifai.core.finetuning import start_finetuning_job, wait_for_job, list_supported_models
+
+    # Show user what models they can choose from
+    for m in list_supported_models():
+        print(m["label"], "—", m["notes"])
 
     job_name = start_finetuning_job(
         training_data_s3_uri="s3://my-bucket/modifai-jobs/job123/training_data.jsonl",
         output_s3_uri="s3://my-bucket/modifai-jobs/job123/output/",
         custom_model_name="modifai-hr-policy-v1",
         role_arn="arn:aws:iam::123456789012:role/ModifaiBedrockRole",
+        base_model_id="amazon.titan-text-express-v1",   # or any key from SUPPORTED_FINETUNE_MODELS
     )
     model_arn = wait_for_job(job_name)
     print("Fine-tuned model ARN:", model_arn)
@@ -32,8 +37,93 @@ import boto3
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_REGION = os.environ.get("AWS_REGION", "us-east-1")
-_BASE_MODEL_ID = "amazon.titan-text-express-v1"
+_DEFAULT_REGION = os.environ.get("AWS_REGION", "ap-southeast-2")
+
+# ── Supported base models for fine-tuning ─────────────────────────────────────
+# Users can pick any of these when calling run_full_pipeline() or
+# start_finetuning_job(). The "model_id" value is passed directly to Bedrock.
+# Add new entries here as AWS expands Bedrock fine-tuning support.
+
+SUPPORTED_FINETUNE_MODELS: dict[str, dict] = {
+    "titan-text-express": {
+        "label":     "Amazon Titan Text Express",
+        "model_id":  "amazon.titan-text-express-v1",
+        "regions":   ["us-east-1", "us-west-2"],
+        "notes":     "Best general-purpose choice; fastest fine-tuning; lowest cost.",
+        "min_samples": 50,
+    },
+    "titan-text-lite": {
+        "label":     "Amazon Titan Text Lite",
+        "model_id":  "amazon.titan-text-lite-v1",
+        "regions":   ["us-east-1", "us-west-2"],
+        "notes":     "Smallest & cheapest; great for simple instruction-following tasks.",
+        "min_samples": 50,
+    },
+    "nova-micro": {
+        "label":     "Amazon Nova Micro",
+        "model_id":  "amazon.nova-micro-v1:0",
+        "regions":   ["us-east-1", "ap-southeast-2"],
+        "notes":     "Ultra-fast, ultra-low-cost; ideal for high-volume QA datasets.",
+        "min_samples": 50,
+    },
+    "nova-lite": {
+        "label":     "Amazon Nova Lite",
+        "model_id":  "amazon.nova-lite-v1:0",
+        "regions":   ["us-east-1", "ap-southeast-2"],
+        "notes":     "Balanced speed & quality; supports multimodal inputs.",
+        "min_samples": 50,
+    },
+    "nova-pro": {
+        "label":     "Amazon Nova Pro",
+        "model_id":  "amazon.nova-pro-v1:0",
+        "regions":   ["us-east-1", "ap-southeast-2"],
+        "notes":     "Most capable Nova model; best for complex reasoning tasks.",
+        "min_samples": 50,
+    },
+    "llama3-8b": {
+        "label":     "Meta Llama 3 8B Instruct",
+        "model_id":  "meta.llama3-8b-instruct-v1:0",
+        "regions":   ["us-east-1", "us-west-2"],
+        "notes":     "Open-weight; excellent instruction-following; community favourite.",
+        "min_samples": 100,
+    },
+    "llama3-70b": {
+        "label":     "Meta Llama 3 70B Instruct",
+        "model_id":  "meta.llama3-70b-instruct-v1:0",
+        "regions":   ["us-east-1", "us-west-2"],
+        "notes":     "High-capacity open-weight model; best quality, higher cost.",
+        "min_samples": 100,
+    },
+}
+
+# Default base model (overridable via env var or function argument)
+_BASE_MODEL_ID = os.environ.get(
+    "BEDROCK_FINETUNE_MODEL_ID",
+    SUPPORTED_FINETUNE_MODELS["titan-text-express"]["model_id"],
+)
+
+
+def list_supported_models() -> list[dict]:
+    """
+    Return a list of all models the user can choose for fine-tuning.
+
+    Each dict contains:
+      - key (str):          Short identifier to pass as base_model_id key
+      - label (str):        Human-readable name for display in UI / CLI
+      - model_id (str):     Bedrock model ID to pass to the API
+      - regions (list[str]): AWS regions where this model can be fine-tuned
+      - notes (str):        Brief description for user guidance
+      - min_samples (int):  Minimum training samples required by Bedrock
+
+    Usage in a CLI or API endpoint::
+
+        for m in list_supported_models():
+            print(f"{m['key']:20s}  {m['label']} — {m['notes']}")
+    """
+    return [
+        {"key": key, **info}
+        for key, info in SUPPORTED_FINETUNE_MODELS.items()
+    ]
 
 # Bedrock fine-tuning job statuses
 _TERMINAL_STATUSES = {"Completed", "Failed", "Stopped"}
@@ -62,8 +152,12 @@ def start_finetuning_job(
         role_arn:             IAM role ARN with AmazonBedrockFullAccess + S3 read/write.
                               e.g. "arn:aws:iam::123456789012:role/ModifaiBedrockRole"
         job_name:             Optional unique job name. Auto-generated if not provided.
-        base_model_id:        Bedrock base model to fine-tune (default: titan-text-express-v1).
-        region:               AWS region override (default: us-east-1).
+        base_model_id:        Bedrock base model ID to fine-tune.
+                              Pass a model_id string (e.g. "amazon.titan-text-express-v1")
+                              OR a short key from SUPPORTED_FINETUNE_MODELS
+                              (e.g. "nova-lite"). Call list_supported_models() to see all options.
+                              Default: titan-text-express-v1.
+        region:               AWS region override (default: ap-southeast-2).
         hyperparameters:      Override default training hyperparameters. Defaults:
                               {"epochCount": "2", "batchSize": "8", "learningRate": "0.00005"}
 
@@ -74,6 +168,11 @@ def start_finetuning_job(
         RuntimeError: If job creation fails.
     """
     region = region or _DEFAULT_REGION
+
+    # Resolve short key → full model_id if user passed a convenience alias
+    if base_model_id in SUPPORTED_FINETUNE_MODELS:
+        base_model_id = SUPPORTED_FINETUNE_MODELS[base_model_id]["model_id"]
+
     client = boto3.client("bedrock", region_name=region)
 
     import uuid
