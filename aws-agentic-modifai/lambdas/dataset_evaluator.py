@@ -6,7 +6,8 @@ s3 = boto3.client('s3')
 bedrock = boto3.client('bedrock-runtime', region_name=os.environ.get("AWS_REGION", "ap-south-1"))
 
 def lambda_handler(event, context):
-    dataset_uris = [item['sample_uri'] for item in event]
+    dataset = event.get('dataset', [])
+    dataset_uris = [item.get('sample_uri') for item in dataset if isinstance(item, dict) and 'sample_uri' in item]
     
     if not dataset_uris:
         return {"action": "proceed", "training_data_uri": None, "score": 1.0}

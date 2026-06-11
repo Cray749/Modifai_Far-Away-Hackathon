@@ -30,13 +30,21 @@
     "GenerateDatasetMap": {
       "Type": "Map",
       "ItemsPath": "$.chunks.chunk_uris",
-      "MaxConcurrency": 10,
+      "MaxConcurrency": 2,
       "Iterator": {
         "StartAt": "GenerateSamplesForChunk",
         "States": {
           "GenerateSamplesForChunk": {
             "Type": "Task",
             "Resource": "${DatasetGeneratorLambdaArn}",
+            "Retry": [
+              {
+                "ErrorEquals": ["Lambda.ServiceException", "Lambda.AWSLambdaException", "Lambda.TooManyRequestsException", "States.TaskFailed"],
+                "IntervalSeconds": 10,
+                "MaxAttempts": 4,
+                "BackoffRate": 2
+              }
+            ],
             "End": true
           }
         }

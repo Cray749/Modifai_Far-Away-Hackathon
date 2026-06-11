@@ -24,7 +24,7 @@ def lambda_handler(event, context):
     
     try:
         response = bedrock.converse(
-            modelId="amazon.nova-micro-v1:0",
+            modelId="meta.llama3-8b-instruct-v1:0",
             system=[{"text": system_prompt}],
             messages=[{"role": "user", "content": [{"text": f"Training Loss: {training_loss}"}]}],
             inferenceConfig={"temperature": 0.1, "maxTokens": 200}

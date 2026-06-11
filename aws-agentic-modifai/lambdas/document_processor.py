@@ -1,10 +1,10 @@
 import json
 import boto3
 import os
-import time
 import uuid
+import io
+import PyPDF2
 
-textract = boto3.client('textract', region_name=os.environ.get("AWS_REGION", "ap-south-1"))
 s3 = boto3.client('s3')
 
 def chunk_text(text, target_words=384, overlap_words=48):
@@ -18,34 +18,21 @@ def chunk_text(text, target_words=384, overlap_words=48):
         i += (target_words - overlap_words)
     return chunks
 
-def extract_sync(bucket, key):
+def extract_pdf_text(bucket, key):
     file_bytes = s3.get_object(Bucket=bucket, Key=key)['Body'].read()
-    response = textract.detect_document_text(Document={'Bytes': file_bytes})
-    return "\n".join([block['Text'] for block in response.get('Blocks', []) if block['BlockType'] == 'LINE'])
-
-def extract_async(bucket, key):
-    response = textract.start_document_text_detection(
-        DocumentLocation={"S3Object": {"Bucket": bucket, "Name": key}}
-    )
-    job_id = response['JobId']
+    reader = PyPDF2.PdfReader(io.BytesIO(file_bytes))
     
-    # Poll for completion
-    while True:
-        status_resp = textract.get_document_text_detection(JobId=job_id)
-        status = status_resp['JobStatus']
-        if status == 'SUCCEEDED':
-            all_blocks = status_resp['Blocks']
-            next_token = status_resp.get('NextToken')
-            while next_token:
-                page_resp = textract.get_document_text_detection(JobId=job_id, NextToken=next_token)
-                all_blocks.extend(page_resp['Blocks'])
-                next_token = page_resp.get('NextToken')
-                
-            return "\n".join([block['Text'] for block in all_blocks if block.get('BlockType') == 'LINE'])
-        elif status == 'FAILED':
-            raise RuntimeError(f"Textract failed for {key}")
+    text_pages = []
+    for page in reader.pages:
+        page_text = page.extract_text()
+        if page_text:
+            text_pages.append(page_text)
             
-        time.sleep(5)
+    return "\n".join(text_pages)
+
+def extract_txt(bucket, key):
+    file_bytes = s3.get_object(Bucket=bucket, Key=key)['Body'].read()
+    return file_bytes.decode('utf-8', errors='ignore')
 
 def lambda_handler(event, context):
     strategy = event.get('strategy', {}).get('chunking', {})
@@ -63,10 +50,14 @@ def lambda_handler(event, context):
         ext = key.lower().split('.')[-1]
         
         try:
-            if ext in ['pdf', 'tiff', 'tif']:
-                text = extract_async(bucket, key)
+            if ext in ['pdf']:
+                text = extract_pdf_text(bucket, key)
+            elif ext in ['txt', 'md', 'csv']:
+                text = extract_txt(bucket, key)
             else:
-                text = extract_sync(bucket, key)
+                # Bypass unsupported formats (like images without Textract)
+                print(f"Skipping unsupported file type: {ext}")
+                continue
             all_text.append(text)
         except Exception as e:
             print(f"Failed to process {uri}: {e}")

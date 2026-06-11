@@ -33,7 +33,7 @@ Resources:
     Properties:
       CodeUri: lambdas/
       Handler: intent_analyzer.lambda_handler
-      Runtime: python3.11
+      Runtime: python3.12
       Timeout: 60
       Policies:
         - Statement:
@@ -47,7 +47,7 @@ Resources:
     Properties:
       CodeUri: lambdas/
       Handler: document_processor.lambda_handler
-      Runtime: python3.11
+      Runtime: python3.12
       Timeout: 300
       Policies:
         - S3CrudPolicy:
@@ -65,8 +65,8 @@ Resources:
     Properties:
       CodeUri: lambdas/
       Handler: dataset_generator.lambda_handler
-      Runtime: python3.11
-      Timeout: 180
+      Runtime: python3.12
+      Timeout: 600
       Policies:
         - S3CrudPolicy:
             BucketName: !Ref ModifaiDataBucket
@@ -81,7 +81,7 @@ Resources:
     Properties:
       CodeUri: lambdas/
       Handler: dataset_evaluator.lambda_handler
-      Runtime: python3.11
+      Runtime: python3.12
       Timeout: 120
       Policies:
         - S3CrudPolicy:
@@ -97,7 +97,7 @@ Resources:
     Properties:
       CodeUri: lambdas/
       Handler: fine_tuning_trigger.lambda_handler
-      Runtime: python3.11
+      Runtime: python3.12
       Timeout: 60
       Environment:
         Variables:
@@ -115,7 +115,7 @@ Resources:
     Properties:
       CodeUri: lambdas/
       Handler: status_checker.lambda_handler
-      Runtime: python3.11
+      Runtime: python3.12
       Timeout: 30
       Policies:
         - Statement:
@@ -129,7 +129,7 @@ Resources:
     Properties:
       CodeUri: lambdas/
       Handler: model_evaluator.lambda_handler
-      Runtime: python3.11
+      Runtime: python3.12
       Timeout: 120
       Policies:
         - Statement:
@@ -144,7 +144,7 @@ Resources:
     Properties:
       CodeUri: lambdas/
       Handler: hyperparameter_tuner.lambda_handler
-      Runtime: python3.11
+      Runtime: python3.12
       Timeout: 60
       Policies:
         - Statement:
@@ -158,7 +158,7 @@ Resources:
     Properties:
       CodeUri: lambdas/
       Handler: deployer.lambda_handler
-      Runtime: python3.11
+      Runtime: python3.12
       Timeout: 60
       Policies:
         - Statement:

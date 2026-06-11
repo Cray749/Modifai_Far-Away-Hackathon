@@ -1,6 +1,8 @@
 import json
 import boto3
 import os
+import time
+from botocore.exceptions import ClientError
 
 bedrock = boto3.client('bedrock-runtime', region_name=os.environ.get("AWS_REGION", "ap-south-1"))
 s3 = boto3.client('s3')
@@ -21,16 +23,30 @@ def lambda_handler(event, context):
     """
     
     try:
-        response = bedrock.converse(
-            modelId="amazon.nova-micro-v1:0",
-            system=[{"text": system_prompt}],
-            messages=[{"role": "user", "content": [{"text": f"SOURCE CHUNK:\n{chunk_text}"}]}],
-            inferenceConfig={"temperature": 0.7, "maxTokens": 1000}
-        )
-        raw_response = response['output']['message']['content'][0]['text']
-        raw_response = raw_response.strip().strip("`").strip("json").strip()
-        samples = json.loads(raw_response)
+        for attempt in range(5):
+            try:
+                response = bedrock.converse(
+                    modelId="meta.llama3-8b-instruct-v1:0",
+                    system=[{"text": system_prompt}],
+                    messages=[{"role": "user", "content": [{"text": f"SOURCE CHUNK:\n{chunk_text}"}]}],
+                    inferenceConfig={"temperature": 0.7, "maxTokens": 1000}
+                )
+                raw_response = response['output']['message']['content'][0]['text']
+                raw_response = raw_response.strip().strip("`").strip("json").strip()
+                samples = json.loads(raw_response)
+                break  # success
+            except ClientError as te:
+                if te.response['Error']['Code'] not in ('ThrottlingException', 'TooManyRequestsException'):
+                    raise
+                wait = (2 ** attempt) * 3  # 3, 6, 12, 24, 48 seconds
+                print("USING LLAMA3!!!"); print(f"Throttled, waiting {wait}s before retry (attempt {attempt+1}/5)...")
+                time.sleep(wait)
+                samples = []
+        else:
+            print("All retry attempts exhausted due to throttling.")
+            samples = []
     except Exception as e:
+        print("====== DEBUG: ENTERED EXCEPTION HANDLER IN DATASET_GENERATOR ======")
         print(f"Failed to generate samples: {e}")
         samples = []
         
