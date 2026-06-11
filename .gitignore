@@ -37,3 +37,6 @@ Thumbs.db
 # Build manual and planning docs (optional — remove these lines if you want them in git)
 # P1_BUILD_MANUAL.md
 # implementation_plan.md
+
+# AWS SAM
+.aws-sam/
