@@ -2,9 +2,10 @@ import json
 import boto3
 import os
 import time
-from botocore.exceptions import ClientError
+from google.genai import types
+from google.genai.errors import APIError
+from gemini_helper import get_gemini_client
 
-bedrock = boto3.client('bedrock-runtime', region_name=os.environ.get("AWS_REGION", "ap-south-1"))
 s3 = boto3.client('s3')
 
 def lambda_handler(event, context):
@@ -16,30 +17,35 @@ def lambda_handler(event, context):
     chunk_data = json.loads(s3.get_object(Bucket=bucket, Key=key)['Body'].read())
     chunk_text = chunk_data.get("text", "")
     
-    # 2. Bedrock generation
+    # 2. Gemini generation
     system_prompt = """
     You are a training data generator. Generate 4 question-answer pairs based entirely on the provided chunk.
     Return ONLY a JSON array of objects with "instruction", "input" (empty), and "output" fields.
     """
     
     try:
+        gemini_client = get_gemini_client()
         for attempt in range(5):
             try:
-                response = bedrock.converse(
-                    modelId="meta.llama3-8b-instruct-v1:0",
-                    system=[{"text": system_prompt}],
-                    messages=[{"role": "user", "content": [{"text": f"SOURCE CHUNK:\n{chunk_text}"}]}],
-                    inferenceConfig={"temperature": 0.7, "maxTokens": 1000}
+                response = gemini_client.models.generate_content(
+                    model='gemini-2.5-flash',
+                    contents=f"SOURCE CHUNK:\n{chunk_text}",
+                    config=types.GenerateContentConfig(
+                        system_instruction=system_prompt,
+                        temperature=0.7,
+                        max_output_tokens=1000
+                    )
                 )
-                raw_response = response['output']['message']['content'][0]['text']
+                raw_response = response.text
                 raw_response = raw_response.strip().strip("`").strip("json").strip()
                 samples = json.loads(raw_response)
                 break  # success
-            except ClientError as te:
-                if te.response['Error']['Code'] not in ('ThrottlingException', 'TooManyRequestsException'):
+            except APIError as e:
+                # 429 is rate limiting/quota exhausted
+                if e.code != 429:
                     raise
                 wait = (2 ** attempt) * 3  # 3, 6, 12, 24, 48 seconds
-                print("USING LLAMA3!!!"); print(f"Throttled, waiting {wait}s before retry (attempt {attempt+1}/5)...")
+                print("USING GEMINI!!!"); print(f"Throttled, waiting {wait}s before retry (attempt {attempt+1}/5)...")
                 time.sleep(wait)
                 samples = []
         else:

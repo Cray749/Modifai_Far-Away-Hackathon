@@ -46,25 +46,29 @@ def lambda_handler(event, context):
     You are an AI Architect Agent. Analyze the user's document sample(s).
     Identify the intent (e.g. QA, summarization, instruction). 
     Recommend a chunking strategy (max_tokens, overlap).
-    Recommend a base model. Use "meta.llama3-8b-instruct-v1:0".
+    Recommend a base model. Use "gemini-2.5-flash".
     Recommend initial hyperparameters (epochs, batch_size, learning_rate).
     You MUST output valid JSON ONLY, matching this schema:
     {
       "intent": "QA",
       "chunking": {"strategy": "semantic", "max_tokens": 512, "overlap": 64},
-      "model": "meta.llama3-8b-instruct-v1:0",
+      "model": "gemini-2.5-flash",
       "hyperparameters": {"epochs": 2, "batch_size": 8, "learning_rate": 0.00005}
     }
     """
     
     try:
-        response = bedrock.converse(
-            modelId="meta.llama3-8b-instruct-v1:0",
-            system=[{"text": system_prompt}],
-            messages=[{"role": "user", "content": [{"text": f"Document Samples:\n{combined_sample}"}]}],
-            inferenceConfig={"temperature": 0.1, "maxTokens": 500}
+        gemini_client = get_gemini_client()
+        response = gemini_client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=f"Document Samples:\n{combined_sample}",
+            config=types.GenerateContentConfig(
+                system_instruction=system_prompt,
+                temperature=0.1,
+                max_output_tokens=500
+            )
         )
-        raw_response = response['output']['message']['content'][0]['text']
+        raw_response = response.text
         raw_response = raw_response.strip().strip("`").strip("json").strip()
         strategy = json.loads(raw_response)
     except Exception as e:

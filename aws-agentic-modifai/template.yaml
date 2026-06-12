@@ -39,7 +39,7 @@ Resources:
         - Statement:
           - Effect: Allow
             Action:
-              - bedrock:InvokeModel
+              - secretsmanager:GetSecretValue
             Resource: '*'
 
   DocumentProcessorFunction:
@@ -73,7 +73,7 @@ Resources:
         - Statement:
           - Effect: Allow
             Action:
-              - bedrock:InvokeModel
+              - secretsmanager:GetSecretValue
             Resource: '*'
 
   DatasetEvaluatorFunction:
@@ -89,7 +89,7 @@ Resources:
         - Statement:
           - Effect: Allow
             Action:
-              - bedrock:InvokeModel
+              - secretsmanager:GetSecretValue
             Resource: '*'
 
   FineTuningTriggerFunction:
@@ -135,7 +135,7 @@ Resources:
         - Statement:
           - Effect: Allow
             Action:
-              - bedrock:InvokeModel
+              - secretsmanager:GetSecretValue
               - bedrock:GetModelCustomizationJob
             Resource: '*'
 
@@ -150,7 +150,7 @@ Resources:
         - Statement:
           - Effect: Allow
             Action:
-              - bedrock:InvokeModel
+              - secretsmanager:GetSecretValue
             Resource: '*'
 
   DeployerFunction:

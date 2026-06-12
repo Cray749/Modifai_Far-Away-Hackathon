@@ -1,8 +1,8 @@
 import json
 import boto3
 import os
-
-bedrock = boto3.client('bedrock-runtime', region_name=os.environ.get("AWS_REGION", "ap-south-1"))
+from google.genai import types
+from gemini_helper import get_gemini_client
 
 def lambda_handler(event, context):
     job_status = event.get('job_status', {})
@@ -17,24 +17,29 @@ def lambda_handler(event, context):
     # instead of provisioning every loop attempt.
     
     system_prompt = """
-    You are an AI Model Evaluator. You are given the training loss of a fine-tuning run.
-    Estimate a 'test_score' between 0.0 and 1.0 based on this loss (lower loss = better score).
-    Output JSON ONLY: {"test_score": 0.85, "reasoning": "..."}
+    Evaluate the training loss of the model. 
+    If training loss is > 0.5, the model is underperforming.
+    Return ONLY a JSON object: {"score": float, "feedback": "string"}
+    Score is between 0 and 1 (1 being best).
     """
     
     try:
-        response = bedrock.converse(
-            modelId="meta.llama3-8b-instruct-v1:0",
-            system=[{"text": system_prompt}],
-            messages=[{"role": "user", "content": [{"text": f"Training Loss: {training_loss}"}]}],
-            inferenceConfig={"temperature": 0.1, "maxTokens": 200}
+        gemini_client = get_gemini_client()
+        response = gemini_client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=f"Training Loss: {training_loss}",
+            config=types.GenerateContentConfig(
+                system_instruction=system_prompt,
+                temperature=0.1,
+                max_output_tokens=200
+            )
         )
-        raw_response = response['output']['message']['content'][0]['text']
+        raw_response = response.text
         raw_response = raw_response.strip().strip("`").strip("json").strip()
-        eval_data = json.loads(raw_response)
-        test_score = eval_data.get('test_score', 0.5)
+        evaluation = json.loads(raw_response)
+        test_score = evaluation.get('score', 0.5)
     except Exception as e:
-        print(f"Failed Bedrock evaluation: {e}")
+        print(f"Failed Gemini evaluation: {e}")
         test_score = 0.75
         
     return {

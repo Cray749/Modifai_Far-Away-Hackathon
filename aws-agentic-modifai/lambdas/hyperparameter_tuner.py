@@ -2,7 +2,8 @@ import json
 import boto3
 import os
 
-bedrock = boto3.client('bedrock-runtime', region_name=os.environ.get("AWS_REGION", "ap-south-1"))
+from google.genai import types
+from gemini_helper import get_gemini_client
 
 def lambda_handler(event, context):
     previous_decision = event.get('agent_decision', {})
@@ -48,17 +49,21 @@ def lambda_handler(event, context):
     """
     
     try:
-        response = bedrock.converse(
-            modelId="meta.llama3-8b-instruct-v1:0",
-            system=[{"text": system_prompt.format(current_hp=current_hp, score=weighted_score)}],
-            messages=[{"role": "user", "content": [{"text": "Generate better hyperparameters."}]}],
-            inferenceConfig={"temperature": 0.2, "maxTokens": 300}
+        gemini_client = get_gemini_client()
+        response = gemini_client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents="Generate better hyperparameters.",
+            config=types.GenerateContentConfig(
+                system_instruction=system_prompt.format(current_hp=current_hp, score=weighted_score),
+                temperature=0.2,
+                max_output_tokens=300
+            )
         )
-        raw_response = response['output']['message']['content'][0]['text']
+        raw_response = response.text
         raw_response = raw_response.strip().strip("`").strip("json").strip()
         new_hyperparameters = json.loads(raw_response)
     except Exception as e:
-        print(f"Failed to generate new HP with Bedrock: {e}")
+        print(f"Failed to generate new HP with Gemini: {e}")
         new_hyperparameters = {
             "epochs": current_hp.get("epochs", 2) + 1,
             "batch_size": current_hp.get("batch_size", 8),
