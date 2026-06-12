@@ -41,7 +41,6 @@ def lambda_handler(event, context):
     for attempt in range(5):
         try:
             raw = call_gemini(prompt=prompt, system=SYSTEM_PROMPT, model="gemini-2.0-flash")
-            # Strip markdown fences if present
             raw = raw.strip()
             raw = re.sub(r"^```(?:json)?", "", raw).rstrip("`").strip()
             bracket = raw.find("[")
@@ -80,6 +79,6 @@ def lambda_handler(event, context):
     )
 
     return {
-        "sample_uri": f"s3://{bucket}/{sample_key}",
+        "sample_uri":   f"s3://{bucket}/{sample_key}",
         "sample_count": len(valid)
     }

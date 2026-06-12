@@ -9,6 +9,8 @@ from gemini_helper import call_gemini
 s3 = boto3.client('s3')
 
 
+# ── Text extraction helpers ───────────────────────────────────────────────────
+
 def extract_snippet(bucket: str, key: str, ext: str) -> str:
     """Download a file and return up to 1500 chars of text for intent analysis."""
     file_bytes = s3.get_object(Bucket=bucket, Key=key)['Body'].read()
@@ -74,7 +76,7 @@ def lambda_handler(event, context):
         }
 
     return {
-        "statusCode":        200,
-        "strategy":          strategy,
-        "document_s3_uris":  document_uris
+        "statusCode":       200,
+        "strategy":         strategy,
+        "document_s3_uris": document_uris
     }

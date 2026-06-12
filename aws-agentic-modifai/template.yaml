@@ -45,7 +45,7 @@ Resources:
         - Statement:
           - Effect: Allow
             Action:
-              - bedrock:InvokeModel
+              - secretsmanager:GetSecretValue
             Resource: '*'
         - Statement:
           - Effect: Allow
@@ -150,6 +150,7 @@ Resources:
         - Statement:
           - Effect: Allow
             Action:
+
               - bedrock:GetModelCustomizationJob
             Resource: '*'
         - Statement:

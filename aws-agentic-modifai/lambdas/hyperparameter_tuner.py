@@ -62,8 +62,8 @@ def lambda_handler(event, context):
         }
 
     return {
-        "action":             "tune",
+        "action":              "tune",
         "new_hyperparameters": new_hyperparameters,
-        "tuning_attempt":     attempt_count + 1,
-        "reason":             f"Score {weighted_score:.3f} < {THRESHOLD}. Tuning hyperparameters."
+        "tuning_attempt":      attempt_count + 1,
+        "reason":              f"Score {weighted_score:.3f} < {THRESHOLD}. Tuning hyperparameters."
     }

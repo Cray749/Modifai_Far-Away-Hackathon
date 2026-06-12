@@ -1,7 +1,9 @@
 import boto3
-import json
 
-bedrock = boto3.client('bedrock-runtime', region_name='ap-south-1')
+bedrock = boto3.client(
+    "bedrock-runtime",
+    region_name="ap-south-1"
+)
 
 models_to_test = [
     # APAC inference profiles - correct IDs for ap-south-1
@@ -39,4 +41,3 @@ if working_model:
     print(f"Update all your Lambdas to use: {working_model}")
 else:
     print("❌ No models worked. Daily quota likely exhausted. Try again tomorrow or request quota increase.")
-

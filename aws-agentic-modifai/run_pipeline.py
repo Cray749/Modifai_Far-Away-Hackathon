@@ -6,8 +6,8 @@ import argparse
 from pathlib import Path
 
 # Extracted from your AWS stack
-BUCKET_NAME = "modifai-agentic-stack-modifaidatabucket-ih4v4sufkm1n"
-STATE_MACHINE_ARN = "arn:aws:states:ap-south-1:527371380408:stateMachine:ModifaiStateMachine-cvZo0rsvX2lP"
+BUCKET_NAME = "modifai-modifaidatabucket-i9qdgwtbeceg"
+STATE_MACHINE_ARN = "arn:aws:states:ap-south-1:527371380408:stateMachine:ModifaiStateMachine-A4wCn417NgmJ"
 
 def upload_to_s3(file_path: Path, bucket: str) -> str:
     s3 = boto3.client('s3')

@@ -44,7 +44,7 @@ def call_gemini(prompt: str, system: str = "", model: str = "gemini-2.0-flash") 
 
     Args:
         prompt:  The user message / task description.
-        system:  Optional system instruction (injected as system_instruction).
+        system:  Optional system instruction.
         model:   Gemini model ID (default: gemini-2.0-flash).
 
     Returns:
