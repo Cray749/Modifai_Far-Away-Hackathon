@@ -4,12 +4,11 @@ import json
 bedrock = boto3.client('bedrock-runtime', region_name='ap-south-1')
 
 models_to_test = [
-    # Nova cross-region inference profiles (AP pool)
-    "ap.amazon.nova-micro-v1:0",
-    "ap.amazon.nova-lite-v1:0",
-    # Nova cross-region inference profiles (US pool - separate quota)
-    "us.amazon.nova-micro-v1:0",
-    # Llama and Mistral (may have reset)
+    # APAC inference profiles - correct IDs for ap-south-1
+    "apac.amazon.nova-micro-v1:0",   # cheapest, fastest
+    "apac.amazon.nova-lite-v1:0",    # balanced
+    "apac.amazon.nova-pro-v1:0",     # most capable Nova
+    # Llama3 / Mistral (may work after daily quota reset)
     "meta.llama3-8b-instruct-v1:0",
     "mistral.mistral-7b-instruct-v0:2",
 ]

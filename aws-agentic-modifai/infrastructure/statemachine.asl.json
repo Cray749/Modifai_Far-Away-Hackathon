@@ -83,8 +83,19 @@
     },
     "InitializeFineTuningAttempt": {
       "Type": "Pass",
-      "Result": 0,
-      "ResultPath": "$.tuning_attempt",
+      "Parameters": {
+        "tuning_attempt": 0,
+        "poll_count": 0
+      },
+      "ResultPath": "$",
+      "Next": "StartFineTuningJob"
+    },
+    "ResetPollCount": {
+      "Type": "Pass",
+      "Parameters": {
+        "poll_count": 0
+      },
+      "ResultPath": "$",
       "Next": "StartFineTuningJob"
     },
     "StartFineTuningJob": {
@@ -97,7 +108,26 @@
     "WaitForTraining": {
       "Type": "Wait",
       "Seconds": 60,
-      "Next": "CheckTrainingStatus"
+      "Next": "IncrementPollCount"
+    },
+    "IncrementPollCount": {
+      "Type": "Pass",
+      "Parameters": {
+        "poll_count.$": "States.MathAdd($.poll_count, 1)"
+      },
+      "ResultPath": "$.poll_count_result",
+      "Next": "CheckPollLimit"
+    },
+    "CheckPollLimit": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.poll_count_result.poll_count",
+          "NumericGreaterThan": 30,
+          "Next": "TrainingTimeout"
+        }
+      ],
+      "Default": "CheckTrainingStatus"
     },
     "CheckTrainingStatus": {
       "Type": "Task",
@@ -150,7 +180,7 @@
         {
           "Variable": "$.agent_decision.action",
           "StringEquals": "tune",
-          "Next": "StartFineTuningJob"
+          "Next": "ResetPollCount"
         },
         {
           "Variable": "$.agent_decision.action",
@@ -183,6 +213,11 @@
     "MaxAttemptsFailed": {
       "Type": "Fail",
       "Cause": "Agentic loop hit max retries (3) without reaching desired quality."
+    },
+    "TrainingTimeout": {
+      "Type": "Fail",
+      "Error": "TrainingTimeout",
+      "Cause": "Training status polling exceeded 30 iterations (~30 minutes). Job may be stuck or quota exhausted."
     }
   }
 }

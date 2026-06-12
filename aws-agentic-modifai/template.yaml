@@ -3,6 +3,12 @@ Transform: AWS::Serverless-2016-10-31
 Description: >
   Autonomous Agentic Modifai Pipeline
 
+Globals:
+  Function:
+    Environment:
+      Variables:
+        AWS_REGION_NAME: !Ref AWS::Region
+
 Resources:
   BedrockCustomizationRole:
     Type: AWS::IAM::Role
@@ -41,6 +47,11 @@ Resources:
             Action:
               - bedrock:InvokeModel
             Resource: '*'
+        - Statement:
+          - Effect: Allow
+            Action:
+              - secretsmanager:GetSecretValue
+            Resource: !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:modifai/gemini*'
 
   DocumentProcessorFunction:
     Type: AWS::Serverless::Function
@@ -67,14 +78,17 @@ Resources:
       Handler: dataset_generator.lambda_handler
       Runtime: python3.12
       Timeout: 600
+      Environment:
+        Variables:
+          SAMPLES_PER_CHUNK: '4'
       Policies:
         - S3CrudPolicy:
             BucketName: !Ref ModifaiDataBucket
         - Statement:
           - Effect: Allow
             Action:
-              - bedrock:InvokeModel
-            Resource: '*'
+              - secretsmanager:GetSecretValue
+            Resource: !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:modifai/gemini*'
 
   DatasetEvaluatorFunction:
     Type: AWS::Serverless::Function
@@ -89,8 +103,8 @@ Resources:
         - Statement:
           - Effect: Allow
             Action:
-              - bedrock:InvokeModel
-            Resource: '*'
+              - secretsmanager:GetSecretValue
+            Resource: !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:modifai/gemini*'
 
   FineTuningTriggerFunction:
     Type: AWS::Serverless::Function
@@ -102,6 +116,7 @@ Resources:
       Environment:
         Variables:
           BEDROCK_ROLE_ARN: !GetAtt BedrockCustomizationRole.Arn
+          S3_BUCKET: !Ref ModifaiDataBucket
       Policies:
         - Statement:
           - Effect: Allow
@@ -135,9 +150,13 @@ Resources:
         - Statement:
           - Effect: Allow
             Action:
-              - bedrock:InvokeModel
               - bedrock:GetModelCustomizationJob
             Resource: '*'
+        - Statement:
+          - Effect: Allow
+            Action:
+              - secretsmanager:GetSecretValue
+            Resource: !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:modifai/gemini*'
 
   HyperparameterTunerFunction:
     Type: AWS::Serverless::Function
@@ -146,12 +165,16 @@ Resources:
       Handler: hyperparameter_tuner.lambda_handler
       Runtime: python3.12
       Timeout: 60
+      Environment:
+        Variables:
+          QUALITY_THRESHOLD: '0.85'
+          MAX_TUNING_ATTEMPTS: '3'
       Policies:
         - Statement:
           - Effect: Allow
             Action:
-              - bedrock:InvokeModel
-            Resource: '*'
+              - secretsmanager:GetSecretValue
+            Resource: !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:modifai/gemini*'
 
   DeployerFunction:
     Type: AWS::Serverless::Function
