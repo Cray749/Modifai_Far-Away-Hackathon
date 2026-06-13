@@ -10,9 +10,7 @@ import logging
 import os
 from typing import Optional
 
-import boto3
-from botocore.exceptions import ClientError
-
+from modifai.core.llm_provider import get_llm_provider
 from modifai.agents.schemas import (
     DocMetadata,
     OrchestratorInput,
@@ -126,13 +124,8 @@ class OrchestratorAgent:
         region: Optional[str] = None,
         max_retries: int = 1,
     ):
-        self.model_id = model_id or os.environ.get(
-            "AWS_MODEL_ID", "amazon.nova-micro-v1:0"
-        )
-        # NOTE: ap-south-1 not confirmed for Nova Micro — falling back to us-east-1
-        self.region = region or os.environ.get("AWS_REGION", "us-east-1")
         self.max_retries = max_retries
-        self._client = boto3.client("bedrock-runtime", region_name=self.region)
+        self.provider = get_llm_provider()
 
     # ── Public API ─────────────────────────────────────────────────────────────
 
@@ -158,8 +151,14 @@ class OrchestratorAgent:
 
         while attempt <= self.max_retries:
             try:
-                raw = self._call_bedrock(user_message)
-                strategy = self._parse_tool_output(raw)
+                schema = _TOOL_SPEC["toolSpec"]["inputSchema"]["json"]
+                tool_name = _TOOL_SPEC["toolSpec"]["name"]
+                strategy = self.provider.generate(
+                    system_prompt=_SYSTEM_PROMPT,
+                    user_prompt=user_message,
+                    response_schema=schema,
+                    tool_name=tool_name,
+                )
                 self._validate(strategy)
                 logger.info(
                     "Orchestrator strategy: intent=%s threshold=%.2f spc=%d",
@@ -193,34 +192,6 @@ class OrchestratorAgent:
             f"  domain: {doc_metadata['domain']}\n"
             f"  estimated chunks: {doc_metadata['estimated_chunk_count']}\n\n"
             f"Choose the best pipeline strategy and call set_pipeline_strategy."
-        )
-
-    def _call_bedrock(self, user_message: str) -> dict:
-        response = self._client.converse(
-            modelId=self.model_id,
-            system=[{"text": _SYSTEM_PROMPT}],
-            messages=[
-                {
-                    "role": "user",
-                    "content": [{"text": user_message}],
-                }
-            ],
-            toolConfig={
-                "tools": [_TOOL_SPEC],
-                "toolChoice": {"tool": {"name": "set_pipeline_strategy"}},
-            },
-        )
-        return response
-
-    def _parse_tool_output(self, response: dict) -> dict:
-        """Extract tool input dict from converse response."""
-        content_blocks = response["output"]["message"]["content"]
-        for block in content_blocks:
-            if block.get("toolUse", {}).get("name") == "set_pipeline_strategy":
-                return block["toolUse"]["input"]
-        raise ValueError(
-            "Model did not call set_pipeline_strategy tool. "
-            f"Response content: {content_blocks}"
         )
 
     def _validate(self, strategy: dict) -> None:

@@ -23,8 +23,9 @@ Output schema (locked — do NOT change without team sync):
 import json
 import logging
 import re
-import boto3
 from typing import Any, Dict, List, Optional
+
+from modifai.core.llm_provider import get_llm_provider
 
 logger = logging.getLogger(__name__)
 
@@ -142,40 +143,34 @@ def critique_sample(
         model_id:    Bedrock model ID
         max_retries: re-prompt once on malformed JSON before giving up
     """
-    client = boto3.client("bedrock-runtime", region_name=aws_region)
+    provider = get_llm_provider()
     user_msg = _build_user_message(sample, chunk_text)
 
     for attempt in range(max_retries + 1):
         try:
-            response = client.converse(
-                modelId=model_id,
-                system=[{"text": CRITIC_SYSTEM_PROMPT}],
-                messages=[{"role": "user", "content": [{"text": user_msg}]}],
-                inferenceConfig={
-                    "temperature": 0.0,
-                    "maxTokens": 600,
-                },
+            result = provider.generate(
+                system_prompt=CRITIC_SYSTEM_PROMPT,
+                user_prompt=user_msg,
+                response_schema=None, # CRITIC uses standard generation parsed from string
             )
-            raw = response["output"]["message"]["content"][0]["text"]
-            result = _parse_critic_response(raw)
 
-            if result is not None:
+            if result is not None and result.get("verdict") in ("accept", "rewrite", "reject"):
                 logger.debug(
                     "Critic verdict for chunk %s: %s — %s",
                     sample.get("chunk_id"),
                     result["verdict"],
-                    result["reason"],
+                    result.get("reason", ""),
                 )
                 return result
 
             logger.warning(
-                "Critic returned malformed JSON on attempt %d. Raw: %s",
+                "Critic returned malformed output on attempt %d: %s",
                 attempt + 1,
-                raw[:200],
+                result,
             )
 
         except Exception as e:
-            logger.error("Bedrock call failed on attempt %d: %s", attempt + 1, e)
+            logger.error("Provider call failed on attempt %d: %s", attempt + 1, e)
 
     logger.error(
         "Critic failed after %d attempts for chunk %s. Defaulting to REJECT.",

@@ -8,7 +8,7 @@ import json
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Literal
 
 from modifai.agents.schemas import AgentEvent
 
@@ -37,7 +37,7 @@ class AgentEventLogger:
 
     def log(
         self,
-        agent: str,
+        agent: Literal["orchestrator", "critic", "curriculum", "knowledge", "agent_discovery", "virtual_mind", "automation_discovery"],
         iteration: int,
         decision: str,
         data: dict,

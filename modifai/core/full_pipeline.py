@@ -166,6 +166,9 @@ def run_full_pipeline(
             "test_answers": None,
             "exit_reason": loop_state["exit_reason"],
             "events": loop_state["events"],
+            "knowledge_analysis": loop_state.get("knowledge_analysis"),
+            "virtual_mind": loop_state.get("virtual_mind"),
+            "automation_discovery_output": loop_state.get("automation_discovery_output"),
         }
 
     # ── Step 4: Format + Upload to S3 ────────────────────────────────────────
@@ -260,4 +263,7 @@ def run_full_pipeline(
         "test_answers": test_answers,
         "exit_reason": loop_state["exit_reason"],
         "events": loop_state["events"],
+        "knowledge_analysis": loop_state.get("knowledge_analysis"),
+        "virtual_mind": loop_state.get("virtual_mind"),
+        "automation_discovery_output": loop_state.get("automation_discovery_output"),
     }

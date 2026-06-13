@@ -1,10 +1,10 @@
 """
 End-to-end pipeline tests. All AWS calls are mocked.
-These tests exercise the full Orchestrator → Critic → Curriculum loop.
+These tests exercise the full Orchestrator → Critic → Curriculum → Knowledge → AgentDiscovery → VirtualMind → AutomationDiscovery loop.
 
 Patching strategy:
-  - OrchestratorAgent, CriticAgent, CurriculumAgent are patched at the
-    pipeline_loop module level (where they are imported), not at the class level.
+  - All agent classes are patched at the pipeline_loop module level (where they are imported).
+  - VirtualMindBuilder is patched at the pipeline_loop module level.
   - _generate_samples is patched directly so no real Bedrock dataset generation runs.
 
 Exit reason coverage:
@@ -20,8 +20,6 @@ import json
 import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
-
-import pytest
 
 from modifai.agents.pipeline_loop import run_agentic_loop
 
@@ -92,6 +90,63 @@ MOCK_CURRICULUM_OUTPUT = {
     "priority_focus": "lacks_steps",
 }
 
+MOCK_KNOWLEDGE_OUTPUT = {
+    "knowledge_summary": "Summary of HR.",
+    "domains": [{"name": "HR", "description": "Human Resources", "evidence": ["Employee handbook"], "confidence": 0.95}],
+    "expertise": [{"name": "Onboarding", "confidence": 0.9}],
+    "key_concepts": ["Onboarding"],
+    "workflows": [{"name": "Onboarding", "steps": ["Step 1", "Step 2"], "confidence": 0.85}]
+}
+
+MOCK_DISCOVERED_AGENTS = [
+    {
+        "name": "HR Agent",
+        "description": "Handles HR queries.",
+        "specialization": "Human Resources",
+        "reasoning": "Strong evidence.",
+        "confidence": 0.92,
+        "source_domains": ["HR"],
+        "source_expertise": ["Onboarding"],
+        "capabilities": [
+            {"name": "Answer HR questions", "description": "Responds to HR policy queries."},
+        ],
+    }
+]
+
+MOCK_VIRTUAL_MIND = {
+    "name": "Modifai Virtual Mind",
+    "description": "A virtual mind for the organization.",
+    "domains": ["HR"],
+    "key_concepts": ["Onboarding"],
+    "agents": MOCK_DISCOVERED_AGENTS,
+}
+
+MOCK_AUTOMATION_OUTPUT = {
+    "executive_summary": "1 automation opportunity identified in HR with high business impact.",
+    "automation_opportunities": [
+        {
+            "name": "Onboarding Automation",
+            "description": "Automates the new hire onboarding workflow.",
+            "owning_agent": "HR Agent",
+            "automation_score": 88,
+            "confidence": 0.90,
+            "business_impact": "High",
+            "impact_reasoning": "Repetitive, multi-step process with strong documentation.",
+            "estimated_benefits": ["3 hours saved per hire (estimated)", "Faster account provisioning"],
+            "evidence": ["Employee handbook"],
+            "source_workflow": "Onboarding",
+            "source_domains": ["HR"],
+            "reasoning": "Well-documented, standardised 2-step workflow.",
+            "automation_blueprint": {
+                "trigger": "New employee record created",
+                "actions": ["Create accounts", "Schedule orientation"],
+            },
+        }
+    ],
+    "total_opportunities": 1,
+    "high_impact_count": 1,
+}
+
 
 # ── Helper: build CriticAgent.run_batch return value ─────────────────────────
 
@@ -136,27 +191,44 @@ def _critic_batch_output(accept_pct: float) -> dict:
 
 # ── Test 1: All accepted on first pass — Curriculum never called ──────────────
 
+@patch("modifai.agents.pipeline_loop.AutomationDiscoveryAgent")
+@patch("modifai.agents.pipeline_loop.VirtualMindBuilder")
+@patch("modifai.agents.pipeline_loop.AgentDiscoveryAgent")
+@patch("modifai.agents.pipeline_loop.KnowledgeAgent")
 @patch("modifai.agents.pipeline_loop._generate_samples")
 @patch("modifai.agents.pipeline_loop.CurriculumAgent")
 @patch("modifai.agents.pipeline_loop.CriticAgent")
 @patch("modifai.agents.pipeline_loop.OrchestratorAgent")
 def test_all_accepted_first_pass_skips_curriculum(
-    mock_orch_cls, mock_critic_cls, mock_curriculum_cls, mock_gen
+    mock_orch_cls, mock_critic_cls, mock_curriculum_cls, mock_gen,
+    mock_knowledge_cls, mock_discovery_cls, mock_builder_cls, mock_automation_cls
 ):
+    """Test that curriculum is skipped if all samples pass the threshold."""
     with tempfile.TemporaryDirectory() as tmpdir:
         event_log = f"{tmpdir}/events.jsonl"
 
-        # Orchestrator returns valid strategy
         mock_orch = MagicMock()
         mock_orch_cls.return_value = mock_orch
         mock_orch.run.return_value = MOCK_STRATEGY
 
-        # Critic accepts everything (100%)
         mock_critic = MagicMock()
         mock_critic_cls.return_value = mock_critic
         mock_critic.run_batch.return_value = _critic_batch_output(accept_pct=100.0)
 
-        # Generator returns MOCK_SAMPLES
+        mock_knowledge = MagicMock()
+        mock_knowledge_cls.return_value = mock_knowledge
+        mock_knowledge.run.return_value = MOCK_KNOWLEDGE_OUTPUT
+
+        mock_discovery = MagicMock()
+        mock_discovery_cls.return_value = mock_discovery
+        mock_discovery.run.return_value = MOCK_DISCOVERED_AGENTS
+
+        mock_builder = MagicMock()
+        mock_builder_cls.return_value = mock_builder
+        mock_builder.build.return_value = MOCK_VIRTUAL_MIND
+
+        mock_automation_cls.return_value.run.return_value = MOCK_AUTOMATION_OUTPUT
+
         mock_gen.return_value = MOCK_SAMPLES
 
         state = run_agentic_loop(
@@ -170,42 +242,49 @@ def test_all_accepted_first_pass_skips_curriculum(
         assert state["exit_reason"] == "all_accepted_first_pass"
         assert state["iteration"] == 1
         assert state["curriculum_outputs"] == []
+        assert state["knowledge_analysis"] == MOCK_KNOWLEDGE_OUTPUT
+        assert state["virtual_mind"] == MOCK_VIRTUAL_MIND
+        assert state["virtual_mind"]["agents"][0]["name"] == "HR Agent"
+        assert state["automation_discovery_output"] == MOCK_AUTOMATION_OUTPUT
 
-        # Curriculum.run must never have been called
         mock_curriculum_cls.return_value.run.assert_not_called()
 
-        # Events: 1 orchestrator + 1 critic = exactly 2
-        assert len(state["events"]) == 2
-        assert state["events"][0]["agent"] == "orchestrator"
-        assert state["events"][1]["agent"] == "critic"
+        # Events: orchestrator + critic + knowledge + agent_discovery + virtual_mind + automation_discovery = 6
+        assert len(state["events"]) == 6
+        agents_in_order = [e["agent"] for e in state["events"]]
+        assert agents_in_order == [
+            "orchestrator", "critic", "knowledge", "agent_discovery",
+            "virtual_mind", "automation_discovery"
+        ]
 
-        # final_samples = accepted samples only
         assert len(state["final_samples"]) == len(MOCK_SAMPLES)
-
-        # final_stats matches last critic pass
         assert state["final_stats"]["accept_pct"] == 100.0
 
 
 # ── Test 2: Threshold met after 1 curriculum loop ─────────────────────────────
 
+@patch("modifai.agents.pipeline_loop.AutomationDiscoveryAgent")
+@patch("modifai.agents.pipeline_loop.VirtualMindBuilder")
+@patch("modifai.agents.pipeline_loop.AgentDiscoveryAgent")
+@patch("modifai.agents.pipeline_loop.KnowledgeAgent")
 @patch("modifai.agents.pipeline_loop._generate_samples")
 @patch("modifai.agents.pipeline_loop.CurriculumAgent")
 @patch("modifai.agents.pipeline_loop.CriticAgent")
 @patch("modifai.agents.pipeline_loop.OrchestratorAgent")
 def test_loops_once_when_threshold_met_on_second_critic_pass(
-    mock_orch_cls, mock_critic_cls, mock_curriculum_cls, mock_gen
+    mock_orch_cls, mock_critic_cls, mock_curriculum_cls, mock_gen,
+    mock_knowledge_cls, mock_discovery_cls, mock_builder_cls, mock_automation_cls
 ):
+    """Test that the loop exits early once the quality threshold is met."""
     with tempfile.TemporaryDirectory() as tmpdir:
         event_log = f"{tmpdir}/events.jsonl"
 
         mock_orch = MagicMock()
         mock_orch_cls.return_value = mock_orch
-        mock_orch.run.return_value = MOCK_STRATEGY  # threshold=0.70
+        mock_orch.run.return_value = MOCK_STRATEGY
 
         mock_critic = MagicMock()
         mock_critic_cls.return_value = mock_critic
-        # First pass: 50% accept (below threshold 70%)
-        # Second pass: 100% accept (above threshold)
         mock_critic.run_batch.side_effect = [
             _critic_batch_output(accept_pct=50.0),
             _critic_batch_output(accept_pct=100.0),
@@ -214,9 +293,14 @@ def test_loops_once_when_threshold_met_on_second_critic_pass(
         mock_curriculum = MagicMock()
         mock_curriculum_cls.return_value = mock_curriculum
         mock_curriculum.run.return_value = MOCK_CURRICULUM_OUTPUT
-        # extract_rejection_reasons is a staticmethod on CurriculumAgent;
-        # it is called via CurriculumAgent.extract_rejection_reasons(batch_output)
-        # which resolves to the real static method — no patching needed here.
+
+        mock_knowledge = MagicMock()
+        mock_knowledge_cls.return_value = mock_knowledge
+        mock_knowledge.run.return_value = MOCK_KNOWLEDGE_OUTPUT
+
+        mock_discovery_cls.return_value.run.return_value = MOCK_DISCOVERED_AGENTS
+        mock_builder_cls.return_value.build.return_value = MOCK_VIRTUAL_MIND
+        mock_automation_cls.return_value.run.return_value = MOCK_AUTOMATION_OUTPUT
 
         mock_gen.return_value = MOCK_SAMPLES
 
@@ -231,46 +315,57 @@ def test_loops_once_when_threshold_met_on_second_critic_pass(
         assert state["exit_reason"] == "threshold_met"
         assert state["iteration"] == 2
         assert len(state["curriculum_outputs"]) == 1
+        assert state["virtual_mind"] == MOCK_VIRTUAL_MIND
+        assert state["automation_discovery_output"] == MOCK_AUTOMATION_OUTPUT
 
-        # Events: orchestrator + critic(iter1) + curriculum(iter1) + critic(iter2) = 4
-        assert len(state["events"]) == 4
+        # Events: orch + critic + curriculum + critic + knowledge + discovery + virtual_mind + automation_discovery = 8
+        assert len(state["events"]) == 8
         agents_in_order = [e["agent"] for e in state["events"]]
-        assert agents_in_order == ["orchestrator", "critic", "curriculum", "critic"]
+        assert agents_in_order == [
+            "orchestrator", "critic", "curriculum", "critic",
+            "knowledge", "agent_discovery", "virtual_mind", "automation_discovery"
+        ]
 
-        # final_stats = last (second) critic pass
         assert state["final_stats"]["accept_pct"] == 100.0
-
-        # Generator called twice: initial + after curriculum
         assert mock_gen.call_count == 2
-        # Second call must have custom_prompt set from curriculum output
         second_call_kwargs = mock_gen.call_args_list[1][1]
         assert second_call_kwargs["custom_prompt"] == MOCK_CURRICULUM_OUTPUT["targeted_prompt"]
 
 
 # ── Test 3: Max iterations exhausted ─────────────────────────────────────────
 
+@patch("modifai.agents.pipeline_loop.AutomationDiscoveryAgent")
+@patch("modifai.agents.pipeline_loop.VirtualMindBuilder")
+@patch("modifai.agents.pipeline_loop.AgentDiscoveryAgent")
+@patch("modifai.agents.pipeline_loop.KnowledgeAgent")
 @patch("modifai.agents.pipeline_loop._generate_samples")
 @patch("modifai.agents.pipeline_loop.CurriculumAgent")
 @patch("modifai.agents.pipeline_loop.CriticAgent")
 @patch("modifai.agents.pipeline_loop.OrchestratorAgent")
 def test_exits_after_max_iterations(
-    mock_orch_cls, mock_critic_cls, mock_curriculum_cls, mock_gen
+    mock_orch_cls, mock_critic_cls, mock_curriculum_cls, mock_gen,
+    mock_knowledge_cls, mock_discovery_cls, mock_builder_cls, mock_automation_cls
 ):
+    """Test that the loop stops and exits when max iterations are exhausted."""
     with tempfile.TemporaryDirectory() as tmpdir:
         event_log = f"{tmpdir}/events.jsonl"
 
         mock_orch = MagicMock()
         mock_orch_cls.return_value = mock_orch
-        mock_orch.run.return_value = MOCK_STRATEGY  # threshold=0.70
+        mock_orch.run.return_value = MOCK_STRATEGY
 
         mock_critic = MagicMock()
         mock_critic_cls.return_value = mock_critic
-        # Always 50% — never meets 70% threshold
         mock_critic.run_batch.return_value = _critic_batch_output(accept_pct=50.0)
 
         mock_curriculum = MagicMock()
         mock_curriculum_cls.return_value = mock_curriculum
         mock_curriculum.run.return_value = MOCK_CURRICULUM_OUTPUT
+
+        mock_knowledge_cls.return_value.run.return_value = MOCK_KNOWLEDGE_OUTPUT
+        mock_discovery_cls.return_value.run.return_value = MOCK_DISCOVERED_AGENTS
+        mock_builder_cls.return_value.build.return_value = MOCK_VIRTUAL_MIND
+        mock_automation_cls.return_value.run.return_value = MOCK_AUTOMATION_OUTPUT
 
         mock_gen.return_value = MOCK_SAMPLES
 
@@ -284,27 +379,29 @@ def test_exits_after_max_iterations(
 
         assert state["exit_reason"] == "max_iterations"
         assert state["iteration"] == 3
-
-        # Critic runs 3 times (one per iteration)
         assert mock_critic.run_batch.call_count == 3
-
-        # Curriculum runs 2 times (iter1 and iter2, NOT on iter3 — last iteration)
         assert mock_curriculum.run.call_count == 2
         assert len(state["curriculum_outputs"]) == 2
-
-        # Generator: 1 initial + 2 curriculum-driven = 3 total
         assert mock_gen.call_count == 3
+        assert state["virtual_mind"] == MOCK_VIRTUAL_MIND
+        assert state["automation_discovery_output"] == MOCK_AUTOMATION_OUTPUT
 
 
 # ── Test 4: Event log written to disk with correct schema ─────────────────────
 
+@patch("modifai.agents.pipeline_loop.AutomationDiscoveryAgent")
+@patch("modifai.agents.pipeline_loop.VirtualMindBuilder")
+@patch("modifai.agents.pipeline_loop.AgentDiscoveryAgent")
+@patch("modifai.agents.pipeline_loop.KnowledgeAgent")
 @patch("modifai.agents.pipeline_loop._generate_samples")
 @patch("modifai.agents.pipeline_loop.CurriculumAgent")
 @patch("modifai.agents.pipeline_loop.CriticAgent")
 @patch("modifai.agents.pipeline_loop.OrchestratorAgent")
 def test_event_log_written_to_disk(
-    mock_orch_cls, mock_critic_cls, mock_curriculum_cls, mock_gen
+    mock_orch_cls, mock_critic_cls, mock_curriculum_cls, mock_gen,
+    mock_knowledge_cls, mock_discovery_cls, mock_builder_cls, mock_automation_cls
 ):
+    """Test that the agent events are logged correctly to disk."""
     with tempfile.TemporaryDirectory() as tmpdir:
         event_log = f"{tmpdir}/events.jsonl"
 
@@ -315,6 +412,12 @@ def test_event_log_written_to_disk(
         mock_critic = MagicMock()
         mock_critic_cls.return_value = mock_critic
         mock_critic.run_batch.return_value = _critic_batch_output(accept_pct=100.0)
+
+        mock_knowledge_cls.return_value.run.return_value = MOCK_KNOWLEDGE_OUTPUT
+        mock_discovery_cls.return_value.run.return_value = MOCK_DISCOVERED_AGENTS
+        mock_builder_cls.return_value.build.return_value = MOCK_VIRTUAL_MIND
+        mock_automation_cls.return_value.run.return_value = MOCK_AUTOMATION_OUTPUT
+        mock_curriculum_cls.return_value.run.return_value = MOCK_CURRICULUM_OUTPUT
 
         mock_gen.return_value = MOCK_SAMPLES
 
@@ -330,35 +433,43 @@ def test_event_log_written_to_disk(
         assert log_path.exists(), "Event log file was not created"
 
         lines = [l for l in log_path.read_text(encoding="utf-8").splitlines() if l.strip()]
-        assert len(lines) >= 2, "Expected at least 2 events (orchestrator + critic)"
+        assert len(lines) >= 6, "Expected at least 6 events (now includes automation_discovery)"
 
         required_keys = {"event_id", "timestamp", "agent", "iteration", "decision", "data"}
-        valid_agents = {"orchestrator", "critic", "curriculum"}
+        valid_agents = {
+            "orchestrator", "critic", "curriculum", "knowledge",
+            "agent_discovery", "virtual_mind", "automation_discovery"
+        }
 
         for line in lines:
             event = json.loads(line)
-            assert required_keys.issubset(event.keys()), (
-                f"Event missing required keys. Got: {list(event.keys())}"
-            )
+            assert required_keys.issubset(event.keys())
             assert event["agent"] in valid_agents, f"Unknown agent: {event['agent']}"
             assert isinstance(event["iteration"], int)
             assert isinstance(event["decision"], str) and len(event["decision"]) > 0
             assert isinstance(event["data"], dict)
 
-        # Orchestrator event must have iteration=0
         orch_events = [e for e in [json.loads(l) for l in lines] if e["agent"] == "orchestrator"]
         assert len(orch_events) == 1
         assert orch_events[0]["iteration"] == 0
 
+        automation_events = [e for e in [json.loads(l) for l in lines] if e["agent"] == "automation_discovery"]
+        assert len(automation_events) == 1
+
 
 # ── Test 5: Accept pct improves across 3 iterations → resolves at iter 3 ─────
 
+@patch("modifai.agents.pipeline_loop.AutomationDiscoveryAgent")
+@patch("modifai.agents.pipeline_loop.VirtualMindBuilder")
+@patch("modifai.agents.pipeline_loop.AgentDiscoveryAgent")
+@patch("modifai.agents.pipeline_loop.KnowledgeAgent")
 @patch("modifai.agents.pipeline_loop._generate_samples")
 @patch("modifai.agents.pipeline_loop.CurriculumAgent")
 @patch("modifai.agents.pipeline_loop.CriticAgent")
 @patch("modifai.agents.pipeline_loop.OrchestratorAgent")
 def test_accept_pct_increases_across_iterations(
-    mock_orch_cls, mock_critic_cls, mock_curriculum_cls, mock_gen
+    mock_orch_cls, mock_critic_cls, mock_curriculum_cls, mock_gen,
+    mock_knowledge_cls, mock_discovery_cls, mock_builder_cls, mock_automation_cls
 ):
     """Verifies the loop runs Curriculum twice and resolves at iteration 3."""
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -366,20 +477,24 @@ def test_accept_pct_increases_across_iterations(
 
         mock_orch = MagicMock()
         mock_orch_cls.return_value = mock_orch
-        # Set threshold to 0.90 so 3 iterations are needed
         mock_orch.run.return_value = {**MOCK_STRATEGY, "quality_threshold": 0.90}
 
         mock_critic = MagicMock()
         mock_critic_cls.return_value = mock_critic
         mock_critic.run_batch.side_effect = [
-            _critic_batch_output(accept_pct=40.0),   # iter 1: below 90%
-            _critic_batch_output(accept_pct=65.0),   # iter 2: still below 90%
-            _critic_batch_output(accept_pct=100.0),  # iter 3: meets 90% threshold
+            _critic_batch_output(accept_pct=40.0),
+            _critic_batch_output(accept_pct=65.0),
+            _critic_batch_output(accept_pct=100.0),
         ]
 
         mock_curriculum = MagicMock()
         mock_curriculum_cls.return_value = mock_curriculum
         mock_curriculum.run.return_value = MOCK_CURRICULUM_OUTPUT
+
+        mock_knowledge_cls.return_value.run.return_value = MOCK_KNOWLEDGE_OUTPUT
+        mock_discovery_cls.return_value.run.return_value = MOCK_DISCOVERED_AGENTS
+        mock_builder_cls.return_value.build.return_value = MOCK_VIRTUAL_MIND
+        mock_automation_cls.return_value.run.return_value = MOCK_AUTOMATION_OUTPUT
 
         mock_gen.return_value = MOCK_SAMPLES
 
@@ -391,31 +506,27 @@ def test_accept_pct_increases_across_iterations(
             event_log_path=event_log,
         )
 
-        # Resolved before max_iterations
         assert state["exit_reason"] == "threshold_met"
         assert state["iteration"] == 3
-
-        # Curriculum ran twice (after iter 1 and iter 2)
         assert mock_curriculum.run.call_count == 2
         assert len(state["curriculum_outputs"]) == 2
-
-        # Final stats reflect iter 3 result
         assert state["final_stats"]["accept_pct"] == 100.0
+        assert state["virtual_mind"] == MOCK_VIRTUAL_MIND
+        assert state["automation_discovery_output"] == MOCK_AUTOMATION_OUTPUT
 
-        # Check event log: orch + 3 critic + 2 curriculum = 6 events
+        # orch + 3 critic + 2 curriculum + knowledge + agent_discovery + virtual_mind + automation_discovery = 10
         critic_events = [e for e in state["events"] if e["agent"] == "critic"]
         curriculum_events = [e for e in state["events"] if e["agent"] == "curriculum"]
+        automation_events = [e for e in state["events"] if e["agent"] == "automation_discovery"]
         assert len(critic_events) == 3
         assert len(curriculum_events) == 2
+        assert len(automation_events) == 1
+        assert len(state["events"]) == 10
 
-        # Verify critic event iteration numbers
         critic_iters = [e["iteration"] for e in critic_events]
         assert critic_iters == [1, 2, 3]
 
-        # Generator called: 1 initial + 2 curriculum-prompted = 3 times
         assert mock_gen.call_count == 3
-        # First call: custom_prompt=None
         assert mock_gen.call_args_list[0][1]["custom_prompt"] is None
-        # Second and third calls: custom_prompt from curriculum
         assert mock_gen.call_args_list[1][1]["custom_prompt"] == MOCK_CURRICULUM_OUTPUT["targeted_prompt"]
         assert mock_gen.call_args_list[2][1]["custom_prompt"] == MOCK_CURRICULUM_OUTPUT["targeted_prompt"]

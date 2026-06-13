@@ -23,12 +23,21 @@ from typing import Dict, List, Optional
 from modifai.agents.orchestrator import OrchestratorAgent
 from modifai.agents.curriculum import CurriculumAgent
 from modifai.agents.critic import CriticAgent          # module-level for test patching
+from modifai.agents.knowledge_agent import KnowledgeAgent
+from modifai.agents.agent_discovery import AgentDiscoveryAgent
+from modifai.agents.virtual_mind_builder import VirtualMindBuilder
+from modifai.agents.automation_discovery import AutomationDiscoveryAgent
 from modifai.agents.logging_utils import AgentEventLogger
 from modifai.agents.schemas import (
     DocMetadata,
     OrchestratorOutput,
     PipelineLoopState,
+    CriticStats,
+    CurriculumOutput,
+    VirtualMind,
+    AutomationDiscoveryOutput,
 )
+from typing import Dict, List, Optional, Literal
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +67,7 @@ def run_agentic_loop(
         PipelineLoopState with final_samples, final_stats, events, exit_reason
     """
     event_logger = AgentEventLogger(path=event_log_path)
-    curriculum_outputs: List[dict] = []
+    curriculum_outputs: List[CurriculumOutput] = []
 
     # ── Convert raw chunks to structured format for CriticAgent ───────────────
     # CriticAgent needs {"chunk_id": int, "text": str} dicts for chunk lookup.
@@ -101,8 +110,8 @@ def run_agentic_loop(
     curriculum_agent = CurriculumAgent(model_id=model_id, region=region)
 
     iteration = 0
-    exit_reason = "max_iterations"
-    stats: dict = {"total": 0, "accepted": 0, "rewritten": 0, "rejected": 0, "accept_pct": 0.0}
+    exit_reason: Literal["threshold_met", "max_iterations", "all_accepted_first_pass"] = "max_iterations"
+    stats: CriticStats = {"total": 0, "accepted": 0, "rewritten": 0, "rejected": 0, "accept_pct": 0.0}
 
     while iteration < max_iterations:
         iteration += 1
@@ -214,8 +223,98 @@ def run_agentic_loop(
         logger.info("Regenerated %d samples", len(samples))
 
     # ── Build and return final state ───────────────────────────────────────────
-    all_events = event_logger.read_all()
     final_stats = stats  # last stats from the loop
+
+    # ── Step 4: Knowledge Analysis ─────────────────────────────────────────────
+    logger.info("Running KnowledgeAgent...")
+    knowledge_agent = KnowledgeAgent(model_id=model_id, region=region)
+    knowledge_output = knowledge_agent.run(
+        chunks=chunks,
+        doc_metadata=doc_metadata,
+        strategy=strategy,
+    )
+    
+    event_logger.log(
+        agent="knowledge",
+        iteration=iteration,
+        decision=f"extracted {len(knowledge_output.get('domains', []))} domains and {len(knowledge_output.get('workflows', []))} workflows",
+        reason="Knowledge analysis completed successfully.",
+        data=dict(knowledge_output),
+    )
+
+    # ── Step 5: Agent Discovery ───────────────────────────────────────────────
+    logger.info("Running AgentDiscoveryAgent...")
+    discovery_agent = AgentDiscoveryAgent(model_id=model_id, region=region)
+    discovered_agents = discovery_agent.run(knowledge=knowledge_output)
+
+    event_logger.log(
+        agent="agent_discovery",
+        iteration=iteration,
+        decision=(
+            f"discovered {len(discovered_agents)} specialized agent(s): "
+            + ", ".join(a["name"] for a in discovered_agents)
+        ),
+        reason=f"Based on {len(knowledge_output.get('domains', []))} domains "
+               f"and {len(knowledge_output.get('expertise', []))} expertise areas.",
+        data={"agents": [dict(a) for a in discovered_agents]},
+    )
+
+    # ── Step 6: Virtual Mind Builder ────────────────────────────────────────────
+    logger.info("Building VirtualMind...")
+    builder = VirtualMindBuilder()
+    virtual_mind: VirtualMind = builder.build(
+        knowledge=knowledge_output,
+        agents=discovered_agents,
+    )
+
+    event_logger.log(
+        agent="virtual_mind",
+        iteration=iteration,
+        decision=(
+            f"assembled Virtual Mind '{virtual_mind['name']}' "
+            f"with {len(virtual_mind['agents'])} agents across {len(virtual_mind['domains'])} domains"
+        ),
+        reason="VirtualMind successfully assembled from knowledge and discovered agents.",
+        data={
+            "name": virtual_mind["name"],
+            "domains": virtual_mind["domains"],
+            "agent_count": len(virtual_mind["agents"]),
+            "agents": [a["name"] for a in virtual_mind["agents"]],
+        },
+    )
+
+    # ── Step 7: Automation Discovery ────────────────────────────────────────────
+    logger.info("Running AutomationDiscoveryAgent...")
+    automation_agent = AutomationDiscoveryAgent(model_id=model_id, region=region)
+    automation_output: AutomationDiscoveryOutput = automation_agent.run(
+        knowledge=knowledge_output,
+        virtual_mind=virtual_mind,
+    )
+
+    event_logger.log(
+        agent="automation_discovery",
+        iteration=iteration,
+        decision=(
+            f"discovered {automation_output['total_opportunities']} automation opportunities, "
+            f"{automation_output['high_impact_count']} high-impact"
+        ),
+        reason=automation_output["executive_summary"],
+        data={
+            "total_opportunities": automation_output["total_opportunities"],
+            "high_impact_count": automation_output["high_impact_count"],
+            "catalog": [
+                {
+                    "name": a["name"],
+                    "score": a["automation_score"],
+                    "impact": a["business_impact"],
+                    "owning_agent": a["owning_agent"],
+                }
+                for a in automation_output["automation_opportunities"]
+            ],
+        },
+    )
+
+    all_events = event_logger.read_all()
 
     return PipelineLoopState(
         iteration=iteration,
@@ -225,6 +324,9 @@ def run_agentic_loop(
         curriculum_outputs=curriculum_outputs,
         events=all_events,
         exit_reason=exit_reason,
+        knowledge_analysis=knowledge_output,
+        virtual_mind=virtual_mind,
+        automation_discovery_output=automation_output,
     )
 
 

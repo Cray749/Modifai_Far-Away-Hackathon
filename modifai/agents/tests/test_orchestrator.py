@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import pytest
+import os
+os.environ["LLM_PROVIDER"] = "bedrock"
 from unittest.mock import MagicMock, patch
 
 from modifai.agents.orchestrator import OrchestratorAgent
@@ -60,7 +62,7 @@ VALID_TOOL_INPUT = {
 
 # ── Tests ──────────────────────────────────────────────────────────────────────
 
-@patch("modifai.agents.orchestrator.boto3.client")
+@patch("boto3.client")
 def test_happy_path_returns_strategy(mock_boto):
     mock_client = MagicMock()
     mock_boto.return_value = mock_client
@@ -75,7 +77,7 @@ def test_happy_path_returns_strategy(mock_boto):
     assert isinstance(result["reasoning"], str) and len(result["reasoning"]) > 0
 
 
-@patch("modifai.agents.orchestrator.boto3.client")
+@patch("boto3.client")
 def test_retries_once_on_bad_output_then_succeeds(mock_boto):
     """First call returns bad response (no tool), second returns valid tool call."""
     mock_client = MagicMock()
@@ -92,7 +94,7 @@ def test_retries_once_on_bad_output_then_succeeds(mock_boto):
     assert mock_client.converse.call_count == 2
 
 
-@patch("modifai.agents.orchestrator.boto3.client")
+@patch("boto3.client")
 def test_raises_after_exhausting_retries(mock_boto):
     """Both attempts fail — should raise ValueError."""
     mock_client = MagicMock()
@@ -106,7 +108,7 @@ def test_raises_after_exhausting_retries(mock_boto):
 
 
 @pytest.mark.parametrize("bad_intent", ["qa", "Q&A", "chatbot", "", None])
-@patch("modifai.agents.orchestrator.boto3.client")
+@patch("boto3.client")
 def test_rejects_invalid_intent(mock_boto, bad_intent):
     mock_client = MagicMock()
     mock_boto.return_value = mock_client
@@ -120,7 +122,7 @@ def test_rejects_invalid_intent(mock_boto, bad_intent):
 
 
 @pytest.mark.parametrize("bad_threshold", [0.3, 0.99, 1.5, -0.1, "high"])
-@patch("modifai.agents.orchestrator.boto3.client")
+@patch("boto3.client")
 def test_rejects_out_of_range_threshold(mock_boto, bad_threshold):
     mock_client = MagicMock()
     mock_boto.return_value = mock_client
@@ -134,7 +136,7 @@ def test_rejects_out_of_range_threshold(mock_boto, bad_threshold):
 
 
 @pytest.mark.parametrize("bad_spc", [1, 2, 9, 20, "five"])
-@patch("modifai.agents.orchestrator.boto3.client")
+@patch("boto3.client")
 def test_rejects_out_of_range_samples_per_chunk(mock_boto, bad_spc):
     mock_client = MagicMock()
     mock_boto.return_value = mock_client
@@ -147,7 +149,7 @@ def test_rejects_out_of_range_samples_per_chunk(mock_boto, bad_spc):
         agent.run(goal="test", doc_metadata=VALID_DOC_METADATA)
 
 
-@patch("modifai.agents.orchestrator.boto3.client")
+@patch("boto3.client")
 def test_instruction_intent_for_sop_domain(mock_boto):
     mock_client = MagicMock()
     mock_boto.return_value = mock_client

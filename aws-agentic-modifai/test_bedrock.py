@@ -27,17 +27,17 @@ for model_id in models_to_test:
             inferenceConfig={"temperature": 0.7, "maxTokens": 50}
         )
         text = response['output']['message']['content'][0]['text']
-        print(f"✅ SUCCESS! Model works!")
+        print(f"[OK] SUCCESS! Model works!")
         print(f"Response: {text[:200]}")
         working_model = model_id
         break
     except Exception as e:
-        print(f"❌ FAILED: {e}")
+        print(f"[FAIL] FAILED: {e}")
 
 print(f"\n{'='*60}")
 if working_model:
-    print(f"✅ WORKING MODEL: {working_model}")
+    print(f"[OK] WORKING MODEL: {working_model}")
     print(f"Update all your Lambdas to use: {working_model}")
 else:
-    print("❌ No models worked. Daily quota likely exhausted. Try again tomorrow or request quota increase.")
+    print("[FAIL] No models worked. Daily quota likely exhausted. Try again tomorrow or request quota increase.")
 

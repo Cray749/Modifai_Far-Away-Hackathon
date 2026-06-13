@@ -11,7 +11,7 @@ import logging
 import os
 from typing import List, Optional
 
-import boto3
+from modifai.core.llm_provider import get_llm_provider
 
 logger = logging.getLogger(__name__)
 
@@ -70,9 +70,7 @@ def generate_dataset(
     Returns:
         List of sample dicts: {instruction, input, output, chunk_id}
     """
-    model_id = os.environ.get("AWS_MODEL_ID", "amazon.nova-micro-v1:0")
-    region = os.environ.get("AWS_REGION", "ap-southeast-2")
-    client = boto3.client("bedrock-runtime", region_name=region)
+    provider = get_llm_provider()
 
     base_prompt = _BASE_SYSTEM_PROMPTS.get(mode, _BASE_SYSTEM_PROMPTS["QA"])
     system_prompt = base_prompt + _SAMPLE_SCHEMA
@@ -100,13 +98,12 @@ def generate_dataset(
         )
 
         try:
-            response = client.converse(
-                modelId=model_id,
-                system=[{"text": system_prompt}],
-                messages=[{"role": "user", "content": [{"text": user_message}]}],
-                inferenceConfig={"temperature": 0.7, "maxTokens": 2000},
+            raw = provider.generate(
+                system_prompt=system_prompt,
+                user_prompt=user_message,
+                temperature=0.7,
+                return_raw=True
             )
-            raw = response["output"]["message"]["content"][0]["text"]
             samples = _parse_generation_response(raw, chunk_id, samples_per_chunk)
             all_samples.extend(samples)
             logger.debug("Chunk %d: generated %d samples.", chunk_id, len(samples))

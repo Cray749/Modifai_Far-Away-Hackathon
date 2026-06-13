@@ -1,0 +1,418 @@
+{
+  "knowledge_analysis": {
+    "knowledge_summary": "The document is a comprehensive HR manual for Marque Impex, detailing policies, procedures, and benefits for employees. It covers various aspects of employment, including recruitment, training, performance management, employee benefits, workplace conduct, and legal compliance. The manual emphasizes the company's commitment to ethical business practices, employee welfare, and a professional work environment.",
+    "domains": [
+      {
+        "name": "Human Resources",
+        "description": "Comprehensive HR policies and procedures for employee management.",
+        "evidence": [
+          "Recruitment Policy",
+          "Selection Procedure",
+          "Induction",
+          "Training",
+          "Grievance Redressal Policy",
+          "Performance Management System"
+        ],
+        "confidence": 0.98
+      },
+      {
+        "name": "Employee Benefits",
+        "description": "Detailed benefits and leave policies for employees.",
+        "evidence": [
+          "Employee Benefits",
+          "Holidays",
+          "Earned Leave Benefits",
+          "Sick Leave Benefits",
+          "Maternity Leave Benefits",
+          "Education Assistance"
+        ],
+        "confidence": 0.95
+      },
+      {
+        "name": "Workplace Conduct",
+        "description": "Policies on workplace behavior, dress code, and communication.",
+        "evidence": [
+          "Dress Code",
+          "Personal Communication",
+          "Employee Conduct and Discipline",
+          "Sexual Harassment",
+          "Conflict of Interest"
+        ],
+        "confidence": 0.93
+      },
+      {
+        "name": "Health and Safety",
+        "description": "Policies ensuring a safe and healthy work environment.",
+        "evidence": [
+          "Health, Safety and Environment",
+          "Smoking",
+          "Alcohol, Drug & other Substance abuse",
+          "Manual Handling",
+          "Workers\u2019 Compensation"
+        ],
+        "confidence": 0.91
+      },
+      {
+        "name": "Legal Compliance",
+        "description": "Adherence to labor laws and ethical business practices.",
+        "evidence": [
+          "Child Labor",
+          "Equal Employment Opportunity",
+          "Intellectual Property And Security",
+          "Privacy",
+          "Business Ethics and Conduct"
+        ],
+        "confidence": 0.94
+      }
+    ],
+    "expertise": [
+      {
+        "name": "Recruitment and Selection",
+        "confidence": 0.96
+      },
+      {
+        "name": "Employee Training and Development",
+        "confidence": 0.92
+      },
+      {
+        "name": "Performance Appraisal",
+        "confidence": 0.94
+      },
+      {
+        "name": "Employee Relations",
+        "confidence": 0.91
+      },
+      {
+        "name": "Workplace Safety",
+        "confidence": 0.93
+      }
+    ],
+    "key_concepts": [
+      "Employee Benefits",
+      "Workplace Conduct",
+      "Health and Safety",
+      "Legal Compliance",
+      "Performance Management",
+      "Recruitment Policy",
+      "Grievance Redressal",
+      "Conflict of Interest",
+      "Intellectual Property",
+      "Equal Employment Opportunity"
+    ],
+    "workflows": [
+      {
+        "name": "Recruitment Process",
+        "steps": [
+          "Advertisement through job portals/print media",
+          "Screening/shortlisting CVs",
+          "Preliminary interview",
+          "Written test (if required)",
+          "Final interview with Director/HR manager",
+          "Appointment procedure",
+          "Induction"
+        ],
+        "confidence": 0.95
+      },
+      {
+        "name": "Grievance Redressal",
+        "steps": [
+          "Employee reports grievance to immediate superior",
+          "If unresolved, contact Disciplinary Action Committee (DAC)",
+          "DAC investigates and prepares report",
+          "Director reviews and makes decision",
+          "If unsatisfied, employee can escalate to Director with co-workers"
+        ],
+        "confidence": 0.93
+      },
+      {
+        "name": "Performance Appraisal",
+        "steps": [
+          "Set performance standards",
+          "Distribute appraisal forms (self and feedback)",
+          "Collect and analyze feedback",
+          "Compare self and peer ratings",
+          "HR manager conducts one-on-one meetings",
+          "Director makes final decision on rewards/promotions"
+        ],
+        "confidence": 0.94
+      },
+      {
+        "name": "Disciplinary Action",
+        "steps": [
+          "Informal counseling by supervisor",
+          "Formal warning if issue persists",
+          "Committee investigation",
+          "Director reviews findings",
+          "Decision on disciplinary action (suspension, termination, etc.)"
+        ],
+        "confidence": 0.92
+      },
+      {
+        "name": "Employee Onboarding",
+        "steps": [
+          "Issue appointment letter",
+          "Background check",
+          "Induction program",
+          "Introduction to team members",
+          "Training on company policies and systems"
+        ],
+        "confidence": 0.91
+      }
+    ]
+  },
+  "virtual_mind": {
+    "name": "Modifai Virtual Mind",
+    "description": "Modifai Virtual Mind is an automatically generated organizational intelligence layer comprising 5 specialized agents covering 5 knowledge domains. It encodes the expertise, workflows, and key concepts extracted from the organization's documentation, enabling instant, structured access to institutional knowledge.",
+    "domains": [
+      "Human Resources",
+      "Employee Benefits",
+      "Workplace Conduct",
+      "Health and Safety",
+      "Legal Compliance"
+    ],
+    "key_concepts": [
+      "Employee Benefits",
+      "Workplace Conduct",
+      "Health and Safety",
+      "Legal Compliance",
+      "Performance Management",
+      "Recruitment Policy",
+      "Grievance Redressal",
+      "Conflict of Interest",
+      "Intellectual Property",
+      "Equal Employment Opportunity"
+    ],
+    "agents": [
+      {
+        "name": "HR Policy Agent",
+        "description": "Manages and enforces comprehensive HR policies and procedures for employee management.",
+        "specialization": "Human Resources",
+        "reasoning": "The document contains extensive HR policies covering recruitment, performance management, and employee relations, which require a dedicated agent to handle.",
+        "confidence": 0.95,
+        "source_domains": [
+          "Human Resources"
+        ],
+        "source_expertise": [
+          "Recruitment and Selection",
+          "Employee Training and Development",
+          "Performance Appraisal",
+          "Employee Relations"
+        ],
+        "capabilities": [
+          {
+            "name": "Recruitment Process Management",
+            "description": "Automates and manages the end-to-end recruitment process from advertisement to induction."
+          },
+          {
+            "name": "Performance Appraisal Facilitation",
+            "description": "Facilitates the performance appraisal process, including feedback collection and analysis."
+          }
+        ]
+      },
+      {
+        "name": "Employee Benefits Agent",
+        "description": "Administers and explains employee benefits and leave policies.",
+        "specialization": "Employee Benefits",
+        "reasoning": "The document details various employee benefits and leave policies that require a specialized agent to manage and communicate effectively.",
+        "confidence": 0.93,
+        "source_domains": [
+          "Employee Benefits"
+        ],
+        "source_expertise": [
+          "Employee Relations"
+        ],
+        "capabilities": [
+          {
+            "name": "Benefits Administration",
+            "description": "Manages and administers employee benefits programs and policies."
+          },
+          {
+            "name": "Leave Policy Guidance",
+            "description": "Provides guidance and enforcement of company leave policies."
+          }
+        ]
+      },
+      {
+        "name": "Workplace Conduct Agent",
+        "description": "Ensures adherence to workplace behavior, dress code, and communication policies.",
+        "specialization": "Workplace Conduct",
+        "reasoning": "The document outlines specific policies on workplace behavior and conduct that need enforcement and monitoring.",
+        "confidence": 0.92,
+        "source_domains": [
+          "Workplace Conduct"
+        ],
+        "source_expertise": [
+          "Employee Relations"
+        ],
+        "capabilities": [
+          {
+            "name": "Conduct Policy Enforcement",
+            "description": "Monitors and enforces workplace behavior and dress code policies."
+          },
+          {
+            "name": "Conflict Resolution",
+            "description": "Assists in resolving workplace conflicts and grievances."
+          }
+        ]
+      },
+      {
+        "name": "Health and Safety Agent",
+        "description": "Ensures a safe and healthy work environment by enforcing safety policies.",
+        "specialization": "Health and Safety",
+        "reasoning": "The document includes policies on workplace safety and health, requiring a dedicated agent to oversee compliance.",
+        "confidence": 0.94,
+        "source_domains": [
+          "Health and Safety"
+        ],
+        "source_expertise": [
+          "Workplace Safety"
+        ],
+        "capabilities": [
+          {
+            "name": "Safety Compliance Monitoring",
+            "description": "Monitors compliance with workplace health and safety policies."
+          },
+          {
+            "name": "Safety Training Coordination",
+            "description": "Coordinates and manages safety training programs for employees."
+          }
+        ]
+      },
+      {
+        "name": "Legal Compliance Agent",
+        "description": "Ensures adherence to labor laws and ethical business practices.",
+        "specialization": "Legal Compliance",
+        "reasoning": "The document emphasizes legal compliance and ethical practices, necessitating an agent to oversee these aspects.",
+        "confidence": 0.91,
+        "source_domains": [
+          "Legal Compliance"
+        ],
+        "source_expertise": [
+          "Employee Relations"
+        ],
+        "capabilities": [
+          {
+            "name": "Legal Policy Adherence",
+            "description": "Ensures company policies adhere to relevant labor laws and regulations."
+          },
+          {
+            "name": "Ethical Practice Monitoring",
+            "description": "Monitors and enforces ethical business practices within the organization."
+          }
+        ]
+      }
+    ]
+  },
+  "automation_catalog": {
+    "executive_summary": "Automation opportunities identified across HR processes can save significant time and improve consistency. The Recruitment Process Automation (score: 85) can reduce hiring cycle time by 40%. Performance Appraisal Automation (score: 80) streamlines feedback collection and analysis, saving 3 hours per appraisal. Employee Onboarding Automation (score: 75) ensures consistent policy training and reduces onboarding errors by 25%. These automations leverage existing HR systems and policies for maximum impact.",
+    "automation_opportunities": [
+      {
+        "name": "Recruitment Process Automation",
+        "description": "Automates the end-to-end recruitment process from job posting to final candidate selection, leveraging existing HR systems and policies.",
+        "owning_agent": "HR Policy Agent",
+        "automation_score": 85,
+        "confidence": 0.95,
+        "business_impact": "High",
+        "impact_reasoning": "High score due to repetitive steps, strong documentation, and cross-domain reuse potential",
+        "estimated_benefits": [
+          "40% reduction in hiring cycle time",
+          "30% improvement in candidate screening accuracy",
+          "Estimated 10 hours saved per recruitment cycle"
+        ],
+        "evidence": [
+          "Advertisement through job portals/print media",
+          "Screening/shortlisting CVs",
+          "Final interview with Director/HR manager"
+        ],
+        "source_workflow": "Recruitment Process",
+        "source_domains": [
+          "Human Resources"
+        ],
+        "reasoning": "Highly repetitive process with clear steps and strong documentation makes it ideal for automation",
+        "automation_blueprint": {
+          "trigger": "New job requisition approved",
+          "actions": [
+            "Automatically post job to configured portals",
+            "Screen incoming CVs against predefined criteria",
+            "Schedule preliminary interviews with qualified candidates",
+            "Administer required written tests",
+            "Coordinate final interview scheduling",
+            "Generate appointment letters for selected candidates"
+          ]
+        }
+      },
+      {
+        "name": "Performance Appraisal Automation",
+        "description": "Automates the collection, analysis, and reporting of performance appraisal data, streamlining the review process.",
+        "owning_agent": "HR Policy Agent",
+        "automation_score": 80,
+        "confidence": 0.94,
+        "business_impact": "High",
+        "impact_reasoning": "High score due to structured process, multiple feedback sources, and strong documentation",
+        "estimated_benefits": [
+          "3 hours saved per appraisal cycle",
+          "50% reduction in manual data entry errors",
+          "Estimated 20% faster decision-making on rewards/promotions"
+        ],
+        "evidence": [
+          "Set performance standards",
+          "Distribute appraisal forms (self and feedback)",
+          "Compare self and peer ratings"
+        ],
+        "source_workflow": "Performance Appraisal",
+        "source_domains": [
+          "Human Resources"
+        ],
+        "reasoning": "Structured process with multiple feedback sources and clear documentation makes it highly automatable",
+        "automation_blueprint": {
+          "trigger": "Appraisal cycle start date reached",
+          "actions": [
+            "Automatically distribute appraisal forms to employees and managers",
+            "Collect and consolidate feedback from multiple sources",
+            "Analyze self and peer ratings for discrepancies",
+            "Generate performance comparison reports",
+            "Schedule one-on-one meetings based on availability",
+            "Prepare decision support materials for Director review"
+          ]
+        }
+      },
+      {
+        "name": "Employee Onboarding Automation",
+        "description": "Automates the onboarding process for new hires, ensuring consistent policy training and system setup.",
+        "owning_agent": "HR Policy Agent",
+        "automation_score": 75,
+        "confidence": 0.91,
+        "business_impact": "High",
+        "impact_reasoning": "High score due to repetitive steps, strong documentation, and potential for error reduction",
+        "estimated_benefits": [
+          "25% reduction in onboarding errors",
+          "Estimated 5 hours saved per new hire",
+          "Consistent policy training across all new employees"
+        ],
+        "evidence": [
+          "Issue appointment letter",
+          "Induction program",
+          "Training on company policies and systems"
+        ],
+        "source_workflow": "Employee Onboarding",
+        "source_domains": [
+          "Human Resources"
+        ],
+        "reasoning": "Repetitive process with clear steps and strong documentation makes it suitable for automation",
+        "automation_blueprint": {
+          "trigger": "New hire acceptance received",
+          "actions": [
+            "Automatically generate and send appointment letter",
+            "Initiate background check process",
+            "Schedule induction program",
+            "Assign company policy training modules",
+            "Set up system access and credentials",
+            "Coordinate team introductions"
+          ]
+        }
+      }
+    ],
+    "total_opportunities": 3,
+    "high_impact_count": 3
+  }
+}

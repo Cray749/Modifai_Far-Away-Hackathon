@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import pytest
+import os
+os.environ["LLM_PROVIDER"] = "bedrock"
 from unittest.mock import MagicMock, patch
 
 from modifai.agents.curriculum import CurriculumAgent
@@ -88,7 +90,7 @@ def _make_bad_response() -> dict:
 
 # ── Tests ──────────────────────────────────────────────────────────────────────
 
-@patch("modifai.agents.curriculum.boto3.client")
+@patch("boto3.client")
 def test_happy_path_returns_curriculum(mock_boto):
     mock_client = MagicMock()
     mock_boto.return_value = mock_client
@@ -106,7 +108,7 @@ def test_happy_path_returns_curriculum(mock_boto):
     assert len(result["targeted_prompt"]) >= 30
 
 
-@patch("modifai.agents.curriculum.boto3.client")
+@patch("boto3.client")
 def test_retries_once_on_bad_output_then_succeeds(mock_boto):
     mock_client = MagicMock()
     mock_boto.return_value = mock_client
@@ -124,7 +126,7 @@ def test_retries_once_on_bad_output_then_succeeds(mock_boto):
     assert mock_client.converse.call_count == 2
 
 
-@patch("modifai.agents.curriculum.boto3.client")
+@patch("boto3.client")
 def test_raises_on_fewer_than_3_gap_categories(mock_boto):
     mock_client = MagicMock()
     mock_boto.return_value = mock_client
@@ -143,7 +145,7 @@ def test_raises_on_fewer_than_3_gap_categories(mock_boto):
         )
 
 
-@patch("modifai.agents.curriculum.boto3.client")
+@patch("boto3.client")
 def test_raises_when_priority_focus_not_in_gap_names(mock_boto):
     mock_client = MagicMock()
     mock_boto.return_value = mock_client

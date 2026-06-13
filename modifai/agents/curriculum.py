@@ -9,7 +9,7 @@ import logging
 import os
 from typing import List, Optional
 
-import boto3
+from modifai.core.llm_provider import get_llm_provider
 
 from modifai.agents.schemas import (
     CurriculumInput,
@@ -141,13 +141,8 @@ class CurriculumAgent:
         region: Optional[str] = None,
         max_retries: int = 1,
     ):
-        self.model_id = model_id or os.environ.get(
-            "AWS_MODEL_ID", "amazon.nova-micro-v1:0"
-        )
-        # NOTE: ap-south-1 not confirmed for Nova Micro — falling back to us-east-1
-        self.region = region or os.environ.get("AWS_REGION", "us-east-1")
         self.max_retries = max_retries
-        self._client = boto3.client("bedrock-runtime", region_name=self.region)
+        self.provider = get_llm_provider()
 
     # ── Public API ─────────────────────────────────────────────────────────────
 
@@ -183,8 +178,14 @@ class CurriculumAgent:
 
         while attempt <= self.max_retries:
             try:
-                raw = self._call_bedrock(user_message)
-                output = self._parse_tool_output(raw)
+                schema = _TOOL_SPEC["toolSpec"]["inputSchema"]["json"]
+                tool_name = _TOOL_SPEC["toolSpec"]["name"]
+                output = self.provider.generate(
+                    system_prompt=_SYSTEM_PROMPT,
+                    user_prompt=user_message,
+                    response_schema=schema,
+                    tool_name=tool_name,
+                )
                 self._validate(output)
                 logger.info(
                     "Curriculum iter=%d gaps=%d priority=%s",
@@ -228,31 +229,6 @@ class CurriculumAgent:
             f"{numbered}\n\n"
             f"Identify at least 3 gap categories and produce a targeted generation prompt. "
             f"Call analyze_curriculum."
-        )
-
-    def _call_bedrock(self, user_message: str) -> dict:
-        return self._client.converse(
-            modelId=self.model_id,
-            system=[{"text": _SYSTEM_PROMPT}],
-            messages=[
-                {
-                    "role": "user",
-                    "content": [{"text": user_message}],
-                }
-            ],
-            toolConfig={
-                "tools": [_TOOL_SPEC],
-                "toolChoice": {"tool": {"name": "analyze_curriculum"}},
-            },
-        )
-
-    def _parse_tool_output(self, response: dict) -> dict:
-        content_blocks = response["output"]["message"]["content"]
-        for block in content_blocks:
-            if block.get("toolUse", {}).get("name") == "analyze_curriculum":
-                return block["toolUse"]["input"]
-        raise ValueError(
-            f"Model did not call analyze_curriculum tool. Content: {content_blocks}"
         )
 
     def _validate(self, output: dict) -> None:
