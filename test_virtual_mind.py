@@ -20,7 +20,7 @@ from modifai.agents.pipeline_loop import run_agentic_loop
 logging.basicConfig(level=logging.INFO, format="%(levelname)s  %(name)s  %(message)s")
 logger = logging.getLogger(__name__)
 
-PDF_PATH = "375731965-HR-Manual-Employee-Handbook.pdf"
+PDF_PATH = "examples/sample_hr_handbook.pdf"
 EVENT_LOG_PATH = "test_events.jsonl"
 REPORT_PATH = "virtual_mind_report.json"
 

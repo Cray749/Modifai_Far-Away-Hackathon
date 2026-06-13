@@ -14,15 +14,23 @@ venv/
 .venv/
 env/
 
-# AWS credentials — NEVER commit these
+# Environment
+.env
+.env.*
+
+# AWS credentials
 .aws/
 *.credentials
-*.env
-.env
 
-# Pipeline runtime outputs (generated files, not source code)
+# Modifai Pipeline Generated Outputs
+virtual_mind_report.json
+demo_virtual_mind.json
+events.jsonl
 agent_events.jsonl
 smoke_events.jsonl
+test_events.jsonl
+generated_reports/
+output/
 *.jsonl
 
 # IDE
@@ -34,7 +42,7 @@ smoke_events.jsonl
 .DS_Store
 Thumbs.db
 
-# Build manual and planning docs (optional — remove these lines if you want them in git)
+# Build manual and planning docs
 # P1_BUILD_MANUAL.md
 # implementation_plan.md
 
