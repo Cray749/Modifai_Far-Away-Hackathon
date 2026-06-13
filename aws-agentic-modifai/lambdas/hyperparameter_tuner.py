@@ -1,69 +1,150 @@
+"""
+hyperparameter_tuner.py — Lambda: decide whether to deploy or tune further.
+
+Uses Gemini to suggest improved hyperparameters when the model doesn't yet
+meet the quality threshold.  No Amazon Bedrock dependency.
+
+Weighted quality score
+----------------------
+weighted_score = (training_metrics_score * METRIC_WEIGHT)
+               + (test_prompts_score      * TEST_WEIGHT)
+
+Actions
+-------
+"deploy"               weighted_score >= QUALITY_THRESHOLD
+"tune"                 below threshold and attempts remaining
+"max_attempts_reached" below threshold and MAX_TUNING_ATTEMPTS exhausted
+
+Environment variables
+---------------------
+QUALITY_THRESHOLD   Minimum weighted score to approve deployment (default: 0.85)
+MAX_TUNING_ATTEMPTS Maximum tune iterations before giving up     (default: 3)
+METRIC_WEIGHT       Weight for training-metrics score            (default: 0.4)
+TEST_WEIGHT         Weight for test-prompts score                (default: 0.6)
+GEMINI_API_KEY      Gemini API key  (or use Secrets Manager)
+GEMINI_SECRET_NAME  Secrets Manager secret (default: modifai/gemini)
+GEMINI_MODEL        Gemini model ID (default: gemini-2.0-flash)
+"""
+
 import json
-import boto3
+import logging
 import os
 
-from gemini_helper import call_gemini
+from gemini_helper import call_gemini_json
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+
+QUALITY_THRESHOLD   = float(os.environ.get("QUALITY_THRESHOLD",   "0.85"))
+MAX_TUNING_ATTEMPTS = int(os.environ.get("MAX_TUNING_ATTEMPTS",   "3"))
+METRIC_WEIGHT       = float(os.environ.get("METRIC_WEIGHT",       "0.4"))
+TEST_WEIGHT         = float(os.environ.get("TEST_WEIGHT",         "0.6"))
+
+_SYSTEM_PROMPT = (
+    "You are an AI Hyperparameter Tuning Agent for LLM fine-tuning. "
+    "Given the current hyperparameters and quality scores, suggest improved "
+    "hyperparameters that are likely to push the weighted score above the target. "
+    "Make incremental, well-reasoned adjustments — do not make extreme changes. "
+    "Output ONLY valid JSON: "
+    '{"epochs": <int>, "batch_size": <int>, "learning_rate": <float>, '
+    '"rationale": "<one sentence>"}'
+)
 
 
-def lambda_handler(event, context):
-    previous_decision = event.get('agent_decision', {})
-    attempt_count     = previous_decision.get('tuning_attempt', event.get('tuning_attempt', 0))
-    evaluation        = event.get('model_evaluation', {})
+def lambda_handler(event: dict, context) -> dict:
+    """
+    Expected event shape
+    --------------------
+    {
+      "agent_decision": {          # populated on retry iterations
+        "tuning_attempt": 1
+      },
+      "tuning_attempt": 0,         # alternative location (first call)
+      "model_evaluation": {
+        "training_metrics_score": 0.65,
+        "test_prompts_score":     0.70
+      },
+      "job_info": {
+        "hyperparameters": {"epochs": 2, "batch_size": 8, "learning_rate": 0.00005}
+      }
+    }
+    """
+    previous_decision = event.get("agent_decision", {})
+    attempt_count     = previous_decision.get(
+        "tuning_attempt", event.get("tuning_attempt", 0)
+    )
 
-    metric_score = evaluation.get('training_metrics_score', 0.8)
-    test_score   = evaluation.get('test_prompts_score', 0.7)
+    evaluation   = event.get("model_evaluation", {})
+    metric_score = float(evaluation.get("training_metrics_score", 0.8))
+    test_score   = float(evaluation.get("test_prompts_score",     0.7))
 
-    # Weights defined by user requirement (40% training metrics, 60% test performance)
-    weighted_score = (metric_score * 0.4) + (test_score * 0.6)
+    weighted_score = (metric_score * METRIC_WEIGHT) + (test_score * TEST_WEIGHT)
+    logger.info(
+        "Weighted score: %.4f (metric=%.4f×%.1f + test=%.4f×%.1f) | "
+        "threshold=%.2f | attempt=%d/%d",
+        weighted_score,
+        metric_score, METRIC_WEIGHT,
+        test_score,   TEST_WEIGHT,
+        QUALITY_THRESHOLD,
+        attempt_count, MAX_TUNING_ATTEMPTS,
+    )
 
-    THRESHOLD    = float(os.environ.get("QUALITY_THRESHOLD", "0.85"))
-    MAX_ATTEMPTS = int(os.environ.get("MAX_TUNING_ATTEMPTS", "3"))
-
-    if weighted_score >= THRESHOLD:
+    # ── deploy? ───────────────────────────────────────────────────────────────
+    if weighted_score >= QUALITY_THRESHOLD:
         return {
             "action": "deploy",
-            "reason": f"Model achieved weighted score {weighted_score:.3f} >= {THRESHOLD}"
+            "reason": (
+                f"Model achieved weighted score {weighted_score:.4f} "
+                f">= threshold {QUALITY_THRESHOLD}"
+            ),
         }
 
-    if attempt_count >= MAX_ATTEMPTS:
+    # ── max attempts reached? ─────────────────────────────────────────────────
+    if attempt_count >= MAX_TUNING_ATTEMPTS:
         return {
             "action": "max_attempts_reached",
             "reason": (
-                f"Failed to reach threshold {THRESHOLD} after {MAX_ATTEMPTS} attempts. "
-                f"Best weighted score: {weighted_score:.3f}"
-            )
+                f"Failed to reach threshold {QUALITY_THRESHOLD} after "
+                f"{MAX_TUNING_ATTEMPTS} attempt(s). "
+                f"Best weighted score: {weighted_score:.4f}"
+            ),
         }
 
-    current_hp = event.get('job_info', {}).get('hyperparameters', {})
-
-    system_prompt = (
-        "You are an AI Hyperparameter Tuning Agent for LLM fine-tuning. "
-        "Given the current hyperparameters and the model's weighted quality score, "
-        "suggest improved hyperparameters. "
-        "Output ONLY valid JSON: {\"epochs\": <int>, \"batch_size\": <int>, \"learning_rate\": <float>}"
-    )
+    # ── ask Gemini for better hyperparameters ─────────────────────────────────
+    current_hp = event.get("job_info", {}).get("hyperparameters", {})
     prompt = (
         f"Current hyperparameters: {json.dumps(current_hp)}\n"
-        f"Current weighted score: {weighted_score:.3f} (target: {THRESHOLD})\n"
-        "Suggest better hyperparameters to improve the score."
+        f"Training metrics score : {metric_score:.4f}  (weight {METRIC_WEIGHT})\n"
+        f"Test prompts score     : {test_score:.4f}  (weight {TEST_WEIGHT})\n"
+        f"Weighted score         : {weighted_score:.4f}  (target >= {QUALITY_THRESHOLD})\n"
+        f"Tuning attempt         : {attempt_count + 1}/{MAX_TUNING_ATTEMPTS}\n"
+        "Suggest hyperparameter changes to improve the weighted score."
     )
-
     try:
-        raw = call_gemini(prompt=prompt, system=system_prompt, model="gemini-2.0-flash")
-        raw = raw.strip().strip("`").replace("json\n", "").strip()
-        new_hyperparameters = json.loads(raw)
-        print(f"Gemini suggested hyperparameters: {new_hyperparameters}")
-    except Exception as e:
-        print(f"Gemini hyperparameter suggestion failed, incrementing epochs: {e}")
-        new_hyperparameters = {
+        suggestion      = call_gemini_json(prompt=prompt, system=_SYSTEM_PROMPT)
+        new_hp          = {
+            "epochs":        int(suggestion.get("epochs",        current_hp.get("epochs", 2))),
+            "batch_size":    int(suggestion.get("batch_size",    current_hp.get("batch_size", 8))),
+            "learning_rate": float(suggestion.get("learning_rate", current_hp.get("learning_rate", 0.00005))),
+        }
+        rationale = suggestion.get("rationale", "")
+        logger.info("Gemini suggested hyperparameters: %s | rationale: %s", new_hp, rationale)
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Gemini HP suggestion failed — incrementing epochs: %s", exc)
+        new_hp    = {
             "epochs":        current_hp.get("epochs", 2) + 1,
             "batch_size":    current_hp.get("batch_size", 8),
-            "learning_rate": current_hp.get("learning_rate", 0.00005)
+            "learning_rate": current_hp.get("learning_rate", 0.00005),
         }
+        rationale = "Fallback: incremented epochs due to Gemini error."
 
     return {
         "action":              "tune",
-        "new_hyperparameters": new_hyperparameters,
+        "new_hyperparameters": new_hp,
         "tuning_attempt":      attempt_count + 1,
-        "reason":              f"Score {weighted_score:.3f} < {THRESHOLD}. Tuning hyperparameters."
+        "reason": (
+            f"Weighted score {weighted_score:.4f} < threshold {QUALITY_THRESHOLD}. "
+            f"Tuning hyperparameters (attempt {attempt_count + 1}/{MAX_TUNING_ATTEMPTS}). "
+            f"{rationale}"
+        ),
     }

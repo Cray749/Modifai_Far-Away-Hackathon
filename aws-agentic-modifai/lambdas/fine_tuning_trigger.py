@@ -1,54 +1,172 @@
+"""
+fine_tuning_trigger.py — Lambda: kick off a fine-tuning job.
+
+Previously this called Amazon Bedrock's create_model_customization_job API.
+That dependency has been removed.  Instead the Lambda:
+
+  1. Asks Gemini to validate and confirm the training configuration.
+  2. Writes a job-manifest JSON to S3 (acts as the job record for downstream
+     Lambdas such as status_checker).
+  3. Returns the job metadata so the Step Functions pipeline can continue.
+
+To integrate with a real training back-end (Vertex AI, SageMaker, RunPod,
+Modal, etc.) replace the _submit_training_job() stub below with the
+appropriate SDK call.  Everything else stays the same.
+
+Environment variables
+---------------------
+AWS_REGION          AWS region (default: ap-south-1)
+S3_BUCKET           Bucket used for job manifests and training data
+GEMINI_API_KEY      Gemini API key  (or use Secrets Manager)
+GEMINI_SECRET_NAME  Secrets Manager secret name (default: modifai/gemini)
+GEMINI_MODEL        Gemini model ID (default: gemini-2.0-flash)
+JOB_MANIFEST_PREFIX S3 key prefix for job manifest files
+                    (default: modifai-jobs)
+"""
+
 import json
-import boto3
+import logging
 import os
 import uuid
+from datetime import datetime, timezone
 
-bedrock = boto3.client('bedrock', region_name=os.environ.get("AWS_REGION", "ap-south-1"))
+import boto3
+
+from gemini_helper import call_gemini_json
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+
+s3 = boto3.client("s3", region_name=os.environ.get("AWS_REGION", "ap-south-1"))
+
+S3_BUCKET           = os.environ.get("S3_BUCKET", "modifai-bucket")
+JOB_MANIFEST_PREFIX = os.environ.get("JOB_MANIFEST_PREFIX", "modifai-jobs")
+
+_SYSTEM_PROMPT = (
+    "You are an AI Fine-Tuning Orchestrator. "
+    "Given a training configuration, validate it and return a concise "
+    "confirmation with any corrections or warnings. "
+    "Output ONLY valid JSON: "
+    '{"validated": true, "warnings": ["<str>", ...], '
+    '"final_hyperparameters": {"epochs": <int>, "batch_size": <int>, '
+    '"learning_rate": <float>}}'
+)
 
 
-def lambda_handler(event, context):
-    agent_decision = event.get('agent_decision', {})
-    strategy       = event.get('strategy', {}).get('strategy', event.get('strategy', {}))
+# ── training-backend stub ─────────────────────────────────────────────────────
 
-    hyperparameters = strategy.get('hyperparameters', {})
-    if 'new_hyperparameters' in agent_decision:
-        hyperparameters = agent_decision['new_hyperparameters']
+def _submit_training_job(job_manifest: dict) -> str:
+    """
+    Submit a training job to the actual training back-end.
 
-    training_data_uri = event.get('dataset_evaluation', {}).get('training_data_uri')
-    base_model        = strategy.get('model', 'amazon.nova-lite-v1:0')
+    Replace the body of this function with your real SDK call, e.g.:
+      - Google Vertex AI  fine-tuning API
+      - AWS SageMaker     CreateTrainingJob
+      - Modal / RunPod    job submission
 
-    run_id  = event.get('dataset_evaluation', {}).get('run_id', str(uuid.uuid4())[:8])
-    bucket  = event.get('dataset_evaluation', {}).get('bucket', os.environ.get("S3_BUCKET", "modifai-bucket"))
+    Returns a job_id string that status_checker can poll.
+    """
+    # Stub: generate a synthetic job ID and persist the manifest to S3.
+    job_id = job_manifest["job_name"]
+    key    = f"{JOB_MANIFEST_PREFIX}/{job_id}/manifest.json"
+    s3.put_object(
+        Bucket=S3_BUCKET,
+        Key=key,
+        Body=json.dumps(job_manifest, indent=2),
+        ContentType="application/json",
+    )
+    logger.info("Job manifest written to s3://%s/%s", S3_BUCKET, key)
+    return job_id
 
-    job_name          = f"modifai-tune-{run_id}-{str(uuid.uuid4())[:4]}"
-    custom_model_name = f"modifai-model-{run_id}"
-    output_s3_uri     = f"s3://{bucket}/modifai-jobs/{run_id}/output/"
 
-    # Role ARN injected by SAM template via BEDROCK_ROLE_ARN env var
-    role_arn = os.environ.get("BEDROCK_ROLE_ARN")
-    if not role_arn:
-        print("WARNING: BEDROCK_ROLE_ARN not set — fine-tuning job will fail IAM validation.")
+# ── lambda handler ────────────────────────────────────────────────────────────
 
-    # Bedrock API requires all hyperparameter values to be strings
-    bedrock_hp = {k: str(v) for k, v in hyperparameters.items()}
+def lambda_handler(event: dict, context) -> dict:
+    """
+    Expected event shape
+    --------------------
+    {
+      "agent_decision": {                  # from hyperparameter_tuner
+        "new_hyperparameters": {...}       # optional override
+      },
+      "strategy": {                        # from intent_analyzer
+        "strategy": {                      # nested OR flat
+          "model": "...",
+          "hyperparameters": {...}
+        }
+      },
+      "dataset_evaluation": {
+        "training_data_uri": "s3://...",
+        "run_id": "abc123",
+        "bucket": "my-bucket"             # optional override
+      }
+    }
+    """
+    agent_decision = event.get("agent_decision", {})
+
+    # Support both nested  {"strategy": {"strategy": {...}}}
+    # and flat             {"strategy": {...}}
+    raw_strategy = event.get("strategy", {})
+    strategy     = raw_strategy.get("strategy", raw_strategy)
+
+    hyperparameters = strategy.get("hyperparameters", {})
+    if agent_decision.get("new_hyperparameters"):
+        hyperparameters = agent_decision["new_hyperparameters"]
+        logger.info("Using tuned hyperparameters from agent_decision: %s", hyperparameters)
+
+    dataset_eval      = event.get("dataset_evaluation", {})
+    training_data_uri = dataset_eval.get("training_data_uri", "")
+    run_id            = dataset_eval.get("run_id") or str(uuid.uuid4())[:8]
+    bucket            = dataset_eval.get("bucket") or S3_BUCKET
+    base_model        = strategy.get("model", "meta.llama3-8b-instruct-v1:0")
+
+    job_name = f"modifai-tune-{run_id}-{str(uuid.uuid4())[:4]}"
+
+    # ── Gemini: validate config ────────────────────────────────────────────────
+    validation_prompt = (
+        f"Base model: {base_model}\n"
+        f"Training data URI: {training_data_uri}\n"
+        f"Hyperparameters: {json.dumps(hyperparameters)}\n"
+        "Validate this fine-tuning configuration."
+    )
+    try:
+        validation = call_gemini_json(
+            prompt=validation_prompt,
+            system=_SYSTEM_PROMPT,
+        )
+        # Use Gemini's corrections if it returned final_hyperparameters
+        if validation.get("final_hyperparameters"):
+            hyperparameters = validation["final_hyperparameters"]
+        if validation.get("warnings"):
+            for w in validation["warnings"]:
+                logger.warning("Gemini config warning: %s", w)
+        logger.info("Gemini config validation: validated=%s", validation.get("validated"))
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Gemini validation failed — proceeding with supplied config: %s", exc)
+
+    # ── build and persist job manifest ────────────────────────────────────────
+    job_manifest = {
+        "job_name":          job_name,
+        "run_id":            run_id,
+        "base_model":        base_model,
+        "training_data_uri": training_data_uri,
+        "output_s3_uri":     f"s3://{bucket}/{JOB_MANIFEST_PREFIX}/{run_id}/output/",
+        "hyperparameters":   hyperparameters,
+        "status":            "InProgress",
+        "created_at":        datetime.now(timezone.utc).isoformat(),
+    }
 
     try:
-        bedrock.create_model_customization_job(
-            jobName=job_name,
-            customModelName=custom_model_name,
-            roleArn=role_arn or "",
-            baseModelIdentifier=base_model,
-            trainingDataConfig={"s3Uri": training_data_uri},
-            outputDataConfig={"s3Uri": output_s3_uri},
-            hyperParameters=bedrock_hp
-        )
-        print(f"Fine-tuning job started: {job_name}")
-    except Exception as e:
-        print(f"Failed to start fine-tuning job (continuing pipeline): {e}")
+        _submit_training_job(job_manifest)
+        logger.info("Fine-tuning job submitted: %s", job_name)
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Job submission failed (pipeline continues): %s", exc)
 
     return {
         "job_name":          job_name,
         "hyperparameters":   hyperparameters,
         "base_model":        base_model,
-        "training_data_uri": training_data_uri
+        "training_data_uri": training_data_uri,
+        "run_id":            run_id,
+        "bucket":            bucket,
     }

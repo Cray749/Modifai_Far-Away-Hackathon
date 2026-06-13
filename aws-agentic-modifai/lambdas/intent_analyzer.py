@@ -1,82 +1,151 @@
-import json
-import boto3
-import os
+"""
+intent_analyzer.py — Lambda: analyse uploaded documents and produce a
+fine-tuning strategy (intent, chunking, base model, hyperparameters).
+
+All AI inference is routed through gemini_helper.call_gemini_json().
+No Amazon Bedrock dependency.
+
+Environment variables
+---------------------
+AWS_REGION          AWS region for S3 (default: ap-south-1)
+GEMINI_API_KEY      Gemini API key  (or use Secrets Manager)
+GEMINI_SECRET_NAME  Secrets Manager secret name (default: modifai/gemini)
+GEMINI_MODEL        Gemini model ID (default: gemini-2.0-flash)
+BASE_MODEL          Base model identifier forwarded to fine_tuning_trigger
+                    (default: meta.llama3-8b-instruct-v1:0)
+SNIPPET_CHARS       Max chars extracted per document for context
+                    (default: 1500)
+MAX_DOCS_SAMPLED    Number of documents sampled for analysis (default: 3)
+"""
+
 import io
+import logging
+import os
+
+import boto3
 import PyPDF2
 
-from gemini_helper import call_gemini
+from gemini_helper import call_gemini_json
 
-s3 = boto3.client('s3')
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+
+s3 = boto3.client("s3", region_name=os.environ.get("AWS_REGION", "ap-south-1"))
+
+SNIPPET_CHARS    = int(os.environ.get("SNIPPET_CHARS",    "1500"))
+MAX_DOCS_SAMPLED = int(os.environ.get("MAX_DOCS_SAMPLED", "3"))
+BASE_MODEL       = os.environ.get(
+    "BASE_MODEL", "meta.llama3-8b-instruct-v1:0"
+)
+
+_DEFAULT_STRATEGY = {
+    "intent":   "QA",
+    "chunking": {"strategy": "semantic", "max_tokens": 512, "overlap": 64},
+    "model":    BASE_MODEL,
+    "hyperparameters": {
+        "epochs": 2, "batch_size": 8, "learning_rate": 0.00005,
+    },
+}
+
+_SYSTEM_PROMPT = (
+    "You are an AI Architect Agent. Analyse the provided document samples. "
+    "Identify the intent (QA, summarization, or instruction). "
+    "Recommend a chunking strategy and initial fine-tuning hyperparameters. "
+    f"Use '{BASE_MODEL}' as the base model. "
+    "Output ONLY valid JSON matching this exact schema — no markdown, no explanation:\n"
+    "{\n"
+    '  "intent": "QA",\n'
+    '  "chunking": {"strategy": "semantic", "max_tokens": 512, "overlap": 64},\n'
+    f'  "model": "{BASE_MODEL}",\n'
+    '  "hyperparameters": {"epochs": 2, "batch_size": 8, "learning_rate": 0.00005}\n'
+    "}"
+)
 
 
-# ── Text extraction helpers ───────────────────────────────────────────────────
+# ── text extraction helpers ───────────────────────────────────────────────────
 
-def extract_snippet(bucket: str, key: str, ext: str) -> str:
-    """Download a file and return up to 1500 chars of text for intent analysis."""
-    file_bytes = s3.get_object(Bucket=bucket, Key=key)['Body'].read()
-    if ext == 'pdf':
-        reader = PyPDF2.PdfReader(io.BytesIO(file_bytes))
-        text = ""
-        for page in reader.pages[:2]:
-            page_text = page.extract_text()
-            if page_text:
-                text += page_text + "\n"
-        return text[:1500]
-    return file_bytes[:1500].decode('utf-8', errors='ignore')
+def _extract_snippet(bucket: str, key: str) -> str:
+    """Download a file from S3 and return up to SNIPPET_CHARS of text."""
+    ext = key.lower().rsplit(".", 1)[-1] if "." in key else ""
+    file_bytes = s3.get_object(Bucket=bucket, Key=key)["Body"].read()
+
+    if ext == "pdf":
+        try:
+            reader = PyPDF2.PdfReader(io.BytesIO(file_bytes))
+            text = ""
+            for page in reader.pages[:2]:
+                page_text = page.extract_text()
+                if page_text:
+                    text += page_text + "\n"
+            return text[:SNIPPET_CHARS]
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("PDF extraction failed for s3://%s/%s: %s", bucket, key, exc)
+            return ""
+
+    # Plain text / JSON / CSV / JSONL / etc.
+    return file_bytes[:SNIPPET_CHARS].decode("utf-8", errors="ignore")
 
 
-def lambda_handler(event, context):
-    document_uris = event.get('document_s3_uris', [])
-    single_uri    = event.get('document_s3_uri')
+def _parse_s3_uri(uri: str) -> tuple[str, str]:
+    """Return (bucket, key) from an s3://bucket/key URI."""
+    without_scheme = uri[len("s3://"):]
+    bucket, _, key = without_scheme.partition("/")
+    return bucket, key
+
+
+# ── lambda handler ────────────────────────────────────────────────────────────
+
+def lambda_handler(event: dict, context) -> dict:
+    """
+    Expected event shape
+    --------------------
+    {
+      "document_s3_uris": ["s3://bucket/path/doc1.pdf", ...],
+      "document_s3_uri":  "s3://bucket/path/single.pdf"   # optional
+    }
+    """
+    document_uris: list[str] = list(event.get("document_s3_uris", []))
+    single_uri = event.get("document_s3_uri")
     if single_uri and single_uri not in document_uris:
         document_uris.append(single_uri)
 
-    # ── Sample text from up to 3 documents ───────────────────────────────────
-    sample_texts = []
-    for doc_uri in document_uris[:3]:
-        bucket = doc_uri.split("/")[2]
-        key    = "/".join(doc_uri.split("/")[3:])
-        ext    = key.lower().rsplit('.', 1)[-1]
-        try:
-            snippet = extract_snippet(bucket, key, ext)
-            sample_texts.append(f"Snippet from {doc_uri}:\n{snippet}")
-        except Exception as e:
-            print(f"Warning: could not fetch snippet from {doc_uri}: {e}")
-
-    combined_sample = "\n---\n".join(sample_texts) if sample_texts else "No text could be extracted."
-
-    # ── Gemini: analyse intent and recommend strategy ─────────────────────────
-    system_prompt = (
-        "You are an AI Architect Agent. Analyse the provided document samples. "
-        "Identify the intent (QA, summarization, or instruction). "
-        "Recommend a chunking strategy and initial fine-tuning hyperparameters. "
-        "Use 'meta.llama3-8b-instruct-v1:0' as the base model. "
-        "You MUST output valid JSON ONLY matching this exact schema — no markdown, no explanation:\n"
-        "{\n"
-        "  \"intent\": \"QA\",\n"
-        "  \"chunking\": {\"strategy\": \"semantic\", \"max_tokens\": 512, \"overlap\": 64},\n"
-        "  \"model\": \"meta.llama3-8b-instruct-v1:0\",\n"
-        "  \"hyperparameters\": {\"epochs\": 2, \"batch_size\": 8, \"learning_rate\": 0.00005}\n"
-        "}"
-    )
-    prompt = f"Document Samples:\n{combined_sample}"
-
-    try:
-        raw      = call_gemini(prompt=prompt, system=system_prompt, model="gemini-2.0-flash")
-        raw      = raw.strip().strip("`").replace("json\n", "").strip()
-        strategy = json.loads(raw)
-        print(f"Intent analysis complete: intent={strategy.get('intent')}")
-    except Exception as e:
-        print(f"Gemini call failed, falling back to default strategy: {e}")
-        strategy = {
-            "intent":   "QA",
-            "chunking": {"strategy": "semantic", "max_tokens": 512, "overlap": 64},
-            "model":    "meta.llama3-8b-instruct-v1:0",
-            "hyperparameters": {"epochs": 2, "batch_size": 8, "learning_rate": 0.00005}
+    if not document_uris:
+        logger.warning("No document URIs provided — returning default strategy.")
+        return {
+            "statusCode":       200,
+            "strategy":         _DEFAULT_STRATEGY,
+            "document_s3_uris": [],
         }
+
+    # ── sample text from documents ────────────────────────────────────────────
+    sample_texts: list[str] = []
+    for doc_uri in document_uris[:MAX_DOCS_SAMPLED]:
+        try:
+            bucket, key = _parse_s3_uri(doc_uri)
+            snippet = _extract_snippet(bucket, key)
+            sample_texts.append(f"Snippet from {doc_uri}:\n{snippet}")
+            logger.info("Extracted snippet from %s (%d chars)", doc_uri, len(snippet))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Could not fetch snippet from %s: %s", doc_uri, exc)
+
+    combined_sample = (
+        "\n---\n".join(sample_texts) if sample_texts
+        else "No text could be extracted from the supplied documents."
+    )
+
+    # ── Gemini intent analysis ────────────────────────────────────────────────
+    prompt = f"Document Samples:\n{combined_sample}"
+    try:
+        strategy = call_gemini_json(prompt=prompt, system=_SYSTEM_PROMPT)
+        # Ensure base model is not accidentally overridden to something unsupported
+        strategy.setdefault("model", BASE_MODEL)
+        logger.info("Intent analysis complete: intent=%s", strategy.get("intent"))
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Gemini intent analysis failed — using default strategy: %s", exc)
+        strategy = _DEFAULT_STRATEGY
 
     return {
         "statusCode":       200,
         "strategy":         strategy,
-        "document_s3_uris": document_uris
+        "document_s3_uris": document_uris,
     }
