@@ -5,7 +5,7 @@ import time
 import re
 from botocore.exceptions import ClientError
 
-from gemini_helper import call_gemini
+from llm_helper import call_llm
 
 s3 = boto3.client('s3')
 
@@ -30,7 +30,7 @@ def lambda_handler(event, context):
 
     samples_per_chunk = int(os.environ.get("SAMPLES_PER_CHUNK", "4"))
 
-    # ── 2. Gemini generation with retry ──────────────────────────────────────
+    # ── 2. LLM generation with retry ─────────────────────────────────────────
     prompt = (
         f"SOURCE CHUNK (chunk_id={chunk_id}):\n{chunk_text}\n\n"
         f"Generate exactly {samples_per_chunk} training samples from this chunk. "
@@ -40,7 +40,7 @@ def lambda_handler(event, context):
     samples = []
     for attempt in range(5):
         try:
-            raw = call_gemini(prompt=prompt, system=SYSTEM_PROMPT, model="gemini-2.0-flash")
+            raw = call_llm(prompt=prompt, system=SYSTEM_PROMPT)
             raw = raw.strip()
             raw = re.sub(r"^```(?:json)?", "", raw).rstrip("`").strip()
             bracket = raw.find("[")

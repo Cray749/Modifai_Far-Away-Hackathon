@@ -2,8 +2,8 @@ AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
 
 Description: >
-  ModifAI — Gemini-powered LLM fine-tuning pipeline (Bedrock-free).
-  All AI inference is routed through gemini_helper.py using the Gemini API.
+  ModifAI — OpenRouter-powered LLM fine-tuning pipeline (Bedrock-free).
+  All AI inference is routed through llm_helper.py using the OpenRouter API.
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Global defaults applied to every Lambda function
@@ -12,7 +12,7 @@ Globals:
   Function:
     Runtime:      python3.12
     Architectures: [arm64]          # Graviton — cheaper + faster cold starts
-    Timeout:      120               # seconds; increase if Gemini latency is high
+    Timeout:      120               # seconds; increase if LLM latency is high
     MemorySize:   512               # MB
     Layers:
       - !Ref PipelineDepsLayer
@@ -20,10 +20,10 @@ Globals:
       Variables:
         AWS_REGION:          !Ref AWS::Region
         S3_BUCKET:           !Ref PipelineBucket
-        GEMINI_SECRET_NAME:  modifai/gemini
-        GEMINI_MODEL:        gemini-2.0-flash
-        GEMINI_MAX_RETRIES:  "3"
-        GEMINI_RETRY_DELAY:  "1.5"
+        OR_SECRET_NAME:      modifai/or
+        OR_MODEL:            deepseek/deepseek-chat-v3
+        OR_MAX_RETRIES:      "3"
+        OR_RETRY_DELAY:      "1.5"
         JOB_MANIFEST_PREFIX: modifai-jobs
         DEMO_MODE:           "false"
         QUALITY_THRESHOLD:   "0.85"
@@ -67,7 +67,7 @@ Resources:
     Type: AWS::Serverless::LayerVersion
     Properties:
       LayerName:          modifai-pipeline-deps
-      Description:        google-genai, boto3, PyPDF2
+      Description:        requests, boto3, PyPDF2
       ContentUri:         layer/
       CompatibleRuntimes: [python3.12]
       RetentionPolicy:    Retain
@@ -104,10 +104,12 @@ Resources:
                 Resource:
                   - !GetAtt PipelineBucket.Arn
                   - !Sub "${PipelineBucket.Arn}/*"
-              - Sid:    SecretsManagerGemini
+              - Sid:    SecretsManagerOpenRouter
                 Effect: Allow
                 Action: secretsmanager:GetSecretValue
-                Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:modifai/gemini*"
+                Resource:
+                  - "arn:aws:secretsmanager:ap-south-1:527371380408:secret:modifai/or-QtO8iC"
+                  - !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:modifai/or*"
 
   # ── Lambda functions ──────────────────────────────────────────────────────
 
@@ -126,7 +128,7 @@ Resources:
       FunctionName:  !Sub "modifai-fine-tuning-trigger-${Environment}"
       Handler:       fine_tuning_trigger.lambda_handler
       CodeUri:       src/
-      Description:   Validate config via Gemini; write job manifest to S3.
+      Description:   Validate config via LLM; write job manifest to S3.
       Role:          !GetAtt PipelineLambdaRole.Arn
 
   StatusCheckerFunction:
@@ -135,7 +137,7 @@ Resources:
       FunctionName:  !Sub "modifai-status-checker-${Environment}"
       Handler:       status_checker.lambda_handler
       CodeUri:       src/
-      Description:   Poll job status from S3 manifest (or simulate via Gemini).
+      Description:   Poll job status from S3 manifest (or simulate via LLM).
       Role:          !GetAtt PipelineLambdaRole.Arn
 
   ModelEvaluatorFunction:
@@ -144,7 +146,7 @@ Resources:
       FunctionName:  !Sub "modifai-model-evaluator-${Environment}"
       Handler:       model_evaluator.lambda_handler
       CodeUri:       src/
-      Description:   Evaluate model quality using Gemini as critic.
+      Description:   Evaluate model quality using LLM as critic.
       Role:          !GetAtt PipelineLambdaRole.Arn
 
   HyperparameterTunerFunction:
@@ -153,7 +155,7 @@ Resources:
       FunctionName:  !Sub "modifai-hyperparameter-tuner-${Environment}"
       Handler:       hyperparameter_tuner.lambda_handler
       CodeUri:       src/
-      Description:   Decide deploy vs. tune; suggest new hyperparameters via Gemini.
+      Description:   Decide deploy vs. tune; suggest new hyperparameters via LLM.
       Role:          !GetAtt PipelineLambdaRole.Arn
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -4,7 +4,8 @@ fine_tuning_trigger.py — Lambda: kick off a fine-tuning job.
 Previously this called Amazon Bedrock's create_model_customization_job API.
 That dependency has been removed.  Instead the Lambda:
 
-  1. Asks Gemini to validate and confirm the training configuration.
+  1. Asks the LLM (via OpenRouter) to validate and confirm the training
+     configuration.
   2. Writes a job-manifest JSON to S3 (acts as the job record for downstream
      Lambdas such as status_checker).
   3. Returns the job metadata so the Step Functions pipeline can continue.
@@ -17,9 +18,9 @@ Environment variables
 ---------------------
 AWS_REGION          AWS region (default: ap-south-1)
 S3_BUCKET           Bucket used for job manifests and training data
-GEMINI_API_KEY      Gemini API key  (or use Secrets Manager)
-GEMINI_SECRET_NAME  Secrets Manager secret name (default: modifai/gemini)
-GEMINI_MODEL        Gemini model ID (default: gemini-2.0-flash)
+OPENROUTER_API_KEY  OpenRouter API key  (or use Secrets Manager)
+OR_SECRET_NAME      Secrets Manager secret name (default: modifai/or)
+OR_MODEL            OpenRouter model ID (default: deepseek/deepseek-chat-v3)
 JOB_MANIFEST_PREFIX S3 key prefix for job manifest files
                     (default: modifai-jobs)
 """
@@ -32,7 +33,7 @@ from datetime import datetime, timezone
 
 import boto3
 
-from gemini_helper import call_gemini_json
+from llm_helper import call_llm_json
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -122,7 +123,7 @@ def lambda_handler(event: dict, context) -> dict:
 
     job_name = f"modifai-tune-{run_id}-{str(uuid.uuid4())[:4]}"
 
-    # ── Gemini: validate config ────────────────────────────────────────────────
+    # ── LLM: validate config ──────────────────────────────────────────────────
     validation_prompt = (
         f"Base model: {base_model}\n"
         f"Training data URI: {training_data_uri}\n"
@@ -130,19 +131,19 @@ def lambda_handler(event: dict, context) -> dict:
         "Validate this fine-tuning configuration."
     )
     try:
-        validation = call_gemini_json(
+        validation = call_llm_json(
             prompt=validation_prompt,
             system=_SYSTEM_PROMPT,
         )
-        # Use Gemini's corrections if it returned final_hyperparameters
+        # Use the LLM's corrections if it returned final_hyperparameters
         if validation.get("final_hyperparameters"):
             hyperparameters = validation["final_hyperparameters"]
         if validation.get("warnings"):
             for w in validation["warnings"]:
-                logger.warning("Gemini config warning: %s", w)
-        logger.info("Gemini config validation: validated=%s", validation.get("validated"))
+                logger.warning("LLM config warning: %s", w)
+        logger.info("LLM config validation: validated=%s", validation.get("validated"))
     except Exception as exc:  # noqa: BLE001
-        logger.error("Gemini validation failed — proceeding with supplied config: %s", exc)
+        logger.error("LLM validation failed — proceeding with supplied config: %s", exc)
 
     # ── build and persist job manifest ────────────────────────────────────────
     job_manifest = {

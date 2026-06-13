@@ -2,15 +2,15 @@
 intent_analyzer.py — Lambda: analyse uploaded documents and produce a
 fine-tuning strategy (intent, chunking, base model, hyperparameters).
 
-All AI inference is routed through gemini_helper.call_gemini_json().
+All AI inference is routed through llm_helper.call_llm_json().
 No Amazon Bedrock dependency.
 
 Environment variables
 ---------------------
 AWS_REGION          AWS region for S3 (default: ap-south-1)
-GEMINI_API_KEY      Gemini API key  (or use Secrets Manager)
-GEMINI_SECRET_NAME  Secrets Manager secret name (default: modifai/gemini)
-GEMINI_MODEL        Gemini model ID (default: gemini-2.0-flash)
+OPENROUTER_API_KEY  OpenRouter API key  (or use Secrets Manager)
+OR_SECRET_NAME      Secrets Manager secret name (default: modifai/or)
+OR_MODEL            OpenRouter model ID (default: deepseek/deepseek-chat-v3)
 BASE_MODEL          Base model identifier forwarded to fine_tuning_trigger
                     (default: meta.llama3-8b-instruct-v1:0)
 SNIPPET_CHARS       Max chars extracted per document for context
@@ -25,7 +25,7 @@ import os
 import boto3
 import PyPDF2
 
-from gemini_helper import call_gemini_json
+from llm_helper import call_llm_json
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -133,15 +133,15 @@ def lambda_handler(event: dict, context) -> dict:
         else "No text could be extracted from the supplied documents."
     )
 
-    # ── Gemini intent analysis ────────────────────────────────────────────────
+    # ── LLM intent analysis ────────────────────────────────────────────────
     prompt = f"Document Samples:\n{combined_sample}"
     try:
-        strategy = call_gemini_json(prompt=prompt, system=_SYSTEM_PROMPT)
+        strategy = call_llm_json(prompt=prompt, system=_SYSTEM_PROMPT)
         # Ensure base model is not accidentally overridden to something unsupported
         strategy.setdefault("model", BASE_MODEL)
         logger.info("Intent analysis complete: intent=%s", strategy.get("intent"))
     except Exception as exc:  # noqa: BLE001
-        logger.error("Gemini intent analysis failed — using default strategy: %s", exc)
+        logger.error("LLM intent analysis failed — using default strategy: %s", exc)
         strategy = _DEFAULT_STRATEGY
 
     return {

@@ -7,18 +7,18 @@ That dependency has been removed.  The Lambda now:
   1. Reads the job manifest from S3  (written by fine_tuning_trigger).
   2. If a real training back-end is wired up, calls _fetch_job_status()
      which you can customise to query that back-end.
-  3. Falls back to Gemini to generate a plausible demo status when no
-     real back-end is configured.
+  3. Falls back to the LLM (via OpenRouter) to generate a plausible demo
+     status when no real back-end is configured.
 
 Environment variables
 ---------------------
 AWS_REGION              AWS region (default: ap-south-1)
 S3_BUCKET               Bucket that holds job manifests
-GEMINI_API_KEY          Gemini API key  (or use Secrets Manager)
-GEMINI_SECRET_NAME      Secrets Manager secret (default: modifai/gemini)
-GEMINI_MODEL            Gemini model ID (default: gemini-2.0-flash)
+OPENROUTER_API_KEY      OpenRouter API key  (or use Secrets Manager)
+OR_SECRET_NAME          Secrets Manager secret name (default: modifai/or)
+OR_MODEL                OpenRouter model ID (default: deepseek/deepseek-chat-v3)
 JOB_MANIFEST_PREFIX     S3 key prefix (default: modifai-jobs)
-DEMO_MODE               Set to "true" to always return Gemini-simulated
+DEMO_MODE               Set to "true" to always return LLM-simulated
                         status without querying a real back-end
                         (default: false)
 """
@@ -29,7 +29,7 @@ import os
 
 import boto3
 
-from gemini_helper import call_gemini_json
+from llm_helper import call_llm_json
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -60,7 +60,7 @@ def _fetch_job_status(job_manifest: dict) -> dict | None:
       training_metrics : dict {"trainingLoss": float, ...}
       custom_model_arn : str | None
 
-    Return None to fall through to Gemini simulation.
+    Return None to fall through to LLM simulation.
 
     Replace the body of this function with your real SDK call, e.g.:
       - Google Vertex AI  get_tuning_job
@@ -83,7 +83,7 @@ def _fetch_job_status(job_manifest: dict) -> dict | None:
             "custom_model_arn": manifest.get("custom_model_arn"),
         }
     except s3.exceptions.NoSuchKey:
-        logger.info("Manifest not found at s3://%s/%s — using Gemini simulation", S3_BUCKET, key)
+        logger.info("Manifest not found at s3://%s/%s — using LLM simulation", S3_BUCKET, key)
         return None
     except Exception as exc:  # noqa: BLE001
         logger.warning("Could not read manifest from S3: %s", exc)
@@ -126,7 +126,7 @@ def lambda_handler(event: dict, context) -> dict:
         except Exception as exc:  # noqa: BLE001
             logger.warning("Back-end status check failed: %s", exc)
 
-    # ── Gemini simulation (demo / fallback) ──────────────────────────────────
+    # ── LLM simulation (demo / fallback) ─────────────────────────────────────
     hp     = job_info.get("hyperparameters", {})
     prompt = (
         f"Job name: {job_name}\n"
@@ -135,19 +135,19 @@ def lambda_handler(event: dict, context) -> dict:
         "Simulate a completed fine-tuning job status with realistic training loss."
     )
     try:
-        result = call_gemini_json(prompt=prompt, system=_SYSTEM_PROMPT)
+        result = call_llm_json(prompt=prompt, system=_SYSTEM_PROMPT)
         result.setdefault("status",           "Completed")
         result.setdefault("custom_model_arn", None)
         result.setdefault("training_metrics", {"trainingLoss": 0.45})
         logger.info(
-            "Gemini simulated status for %s: status=%s, loss=%s",
+            "LLM simulated status for %s: status=%s, loss=%s",
             job_name,
             result["status"],
             result["training_metrics"].get("trainingLoss"),
         )
         return result
     except Exception as exc:  # noqa: BLE001
-        logger.error("Gemini status simulation failed — using hardcoded fallback: %s", exc)
+        logger.error("LLM status simulation failed — using hardcoded fallback: %s", exc)
         return {
             "status":           "Completed",
             "custom_model_arn": None,

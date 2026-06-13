@@ -1,125 +1,92 @@
 # Modifai — Automated LLM Fine-Tuning Pipeline
 
-> **Hackathon project** · Automatically generates high-quality fine-tuning datasets from your documents using a self-improving multi-agent loop on AWS Bedrock.
+> **Hackathon project** · Automatically generates high-quality fine-tuning datasets from your documents using a self-improving multi-agent loop on AWS — powered by **OpenRouter**.
 
 ---
 
 ## What does Modifai do?
 
-You give it a document (chunked into text segments) and a goal.  
-It automatically:
-1. **Figures out the best strategy** for your document type
-2. **Generates synthetic training samples** (question-answer pairs, instruction-output pairs, etc.)
-3. **Judges the quality** of every sample
-4. **Fixes the bad ones** by learning what went wrong and regenerating
-5. **Hands you a clean dataset** ready for fine-tuning
+You upload documents to S3. The pipeline automatically:
+1. **Analyses your documents** — detects intent (Q&A, summarisation, instruction-following)
+2. **Chunks and processes** them into optimal segments
+3. **Generates synthetic training samples** (question-answer pairs, instruction-output pairs, etc.)
+4. **Evaluates dataset quality** using an LLM critic
+5. **Validates and triggers** a fine-tuning job, writing a manifest to S3
+6. **Monitors job status**, evaluates the trained model, and tunes hyperparameters if needed
+7. **Deploys** the final model via Bedrock provisioned throughput
 
 No manual labelling. No prompt engineering. The agents do it themselves.
 
 ---
 
-## The Three Agents — Simple Explanation
+## Architecture — The 9 Lambda Functions
 
-### 🎯 Orchestrator Agent
-**"The strategist — decides the plan before any work starts"**
+All AI inference is routed through **`llm_helper.py`** using the [OpenRouter](https://openrouter.ai) API.
 
-Looks at your document metadata (what domain is it? how many pages? how dense?) and your goal, then decides:
-- **Intent** — Should it generate Q&A pairs? Instruction-following examples? Tutoring dialogues?
-- **Quality bar** — How strict should the quality checker be? (0.5 = lenient, 0.95 = very strict)
-- **Volume** — How many samples per chunk?
-
-Real example from our smoke test:
 ```
-Goal: "Generate a fine-tuning dataset for customer support Q&A"
-→ intent=QA, quality_threshold=0.85, 4 samples per chunk
-   Reasoning: "High quality threshold for customer support docs"
+Document Upload (S3)
+        │
+        ▼
+┌────────────────────┐
+│  intent_analyzer   │  ← Analyses docs, recommends chunking + hyperparameters
+└────────┬───────────┘
+         │
+         ▼
+┌────────────────────┐
+│ document_processor │  ← Extracts text, chunks docs, uploads chunk JSONs to S3
+└────────┬───────────┘
+         │ (Map State — parallel per chunk)
+         ▼
+┌────────────────────┐
+│ dataset_generator  │  ← Generates Q&A / instruction samples from each chunk
+└────────┬───────────┘
+         │
+         ▼
+┌────────────────────┐
+│ dataset_evaluator  │  ← LLM critic scores dataset quality; proceed or regenerate
+└────────┬───────────┘
+         │
+         ▼
+┌─────────────────────┐
+│ fine_tuning_trigger │  ← Validates config via LLM; writes job manifest to S3
+└────────┬────────────┘
+         │
+         ▼
+┌────────────────────┐
+│  status_checker    │  ← Polls job manifest / simulates status in DEMO_MODE
+└────────┬───────────┘
+         │
+         ▼
+┌────────────────────┐
+│  model_evaluator   │  ← LLM critic estimates generalisation score from loss
+└────────┬───────────┘
+         │
+         ▼
+┌──────────────────────┐
+│ hyperparameter_tuner │  ← deploy / tune / max_attempts_reached decision
+└────────┬─────────────┘
+         │ (if score < threshold → loop back to fine_tuning_trigger)
+         ▼
+┌────────────────────┐
+│     deployer       │  ← Provisions model via Bedrock (no LLM calls)
+└────────────────────┘
 ```
 
 ---
 
-### 🔍 Critic Agent  
-**"The quality inspector — scores every generated sample against the source"**
+## LLM Provider — OpenRouter
 
-For each training sample, it reads the source chunk it was generated from and scores it on 3 dimensions:
+All Lambda functions call `llm_helper.py` which POSTs to the **OpenRouter** `/chat/completions` endpoint (OpenAI-compatible).
 
-| Dimension | What it checks | Example of failure |
-|---|---|---|
-| **Specificity** | Is the answer concrete or vague? | "It depends on the situation" = bad |
-| **Grounding** | Does every fact come from the source? | Inventing facts not in the doc = bad |
-| **Format** | Is it a complete, well-formed answer? | Incomplete sentences = bad |
+| Setting | Value |
+|---|---|
+| Primary model | `deepseek/deepseek-chat-v3` |
+| Fallback 1 | `qwen/qwen3-235b-a22b` |
+| Fallback 2 | `google/gemini-2.5-flash-lite` |
+| Retries | 3 per model, exponential back-off |
+| Secret | `modifai/or` in AWS Secrets Manager (`{"api_key": "sk-or-v1-..."}`) |
 
-Then it issues one of three verdicts:
-- ✅ **accept** — sample is good, keep it
-- ✏️ **rewrite** — salvageable, here's a corrected version
-- ❌ **reject** — too broken to fix, discard
-
-Real example from our smoke test:
-```
-12 samples evaluated → 11 accepted, 1 rewritten, 0 rejected (91.7% quality)
-```
-
----
-
-### 📚 Curriculum Agent  
-**"The teacher — figures out WHY samples failed and writes better instructions"**
-
-Only runs if the Critic says quality is below the threshold.
-
-Takes all the rejection reasons, clusters them into **gap categories** (specific failure patterns), and writes a targeted improvement prompt. Example:
-
-```
-Gap found: "factual_drift" — samples introduce facts not in the source chunk
-Gap found: "too_vague_on_entities" — answers don't name specific systems/tools
-Gap found: "lacks_step_by_step_reasoning" — answers skip intermediate steps
-
-→ Produces: "Each answer MUST enumerate all numbered steps from the source.
-             Name every specific tool, system, or person referenced.
-             Never introduce facts not explicitly stated in the chunk."
-```
-
-This prompt is injected into the next round of dataset generation — the loop self-corrects.
-
----
-
-## The Full Loop
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                                                                 │
-│   Document + Goal                                               │
-│        │                                                        │
-│        ▼                                                        │
-│   ┌─────────────┐                                               │
-│   │ Orchestrator│  → decides intent, threshold, samples/chunk  │
-│   └──────┬──────┘                                               │
-│          │                                                      │
-│          ▼                                                      │
-│   Dataset Generator  → creates N samples per chunk             │
-│          │                                                      │
-│          ▼                                                      │
-│   ┌──────────────┐                                              │
-│   │ Critic Agent │  → accept / rewrite / reject each sample    │
-│   └──────┬───────┘                                              │
-│          │                                                      │
-│   Quality ≥ threshold? ──YES──→ Done ✅ return clean dataset   │
-│          │                                                      │
-│          NO                                                     │
-│          │                                                      │
-│          ▼                                                      │
-│   ┌──────────────────┐                                          │
-│   │ Curriculum Agent │  → identifies gaps, writes better prompt│
-│   └──────┬───────────┘                                          │
-│          │                                                      │
-│   Dataset Generator (with improved prompt) → back to Critic    │
-│                                                                 │
-│   (Repeats up to max_iterations times)                          │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-**Exit conditions:**
-- `threshold_met` — quality hit the bar (best case ✅)
-- `all_accepted_first_pass` — perfect on first try (ideal ✅)
-- `max_iterations` — hit the loop limit, returns best dataset so far
+Models are tried in order on 429 (rate limit) or 5xx errors — the pipeline **never crashes** due to a single model being unavailable.
 
 ---
 
@@ -127,21 +94,34 @@ This prompt is injected into the next round of dataset generation — the loop s
 
 ```
 modifai/
+├── 5 lambda/
+│   ├── llm_helper.py           # Shared OpenRouter client (all LLM calls go here)
+│   ├── intent_analyzer.py      # Lambda 1 — document intent + strategy
+│   ├── document_processor.py   # Lambda 2 — text extraction + chunking
+│   ├── dataset_generator.py    # Lambda 3 — sample generation (Map State)
+│   ├── dataset_evaluator.py    # Lambda 4 — dataset quality critic
+│   ├── fine_tuning_trigger.py  # Lambda 5 — config validation + job manifest
+│   ├── status_checker.py       # Lambda 6 — job status polling / simulation
+│   ├── model_evaluator.py      # Lambda 7 — model quality estimation
+│   ├── hyperparameter_tuner.py # Lambda 8 — deploy / tune decision
+│   ├── deployer.py             # Lambda 9 — Bedrock provisioned throughput (no LLM)
+│   ├── requirements.txt        # requests, boto3, PyPDF2
+│   └── template.yaml           # AWS SAM template
 ├── core/
-│   ├── critic_agent.py         # The Critic's LLM evaluation functions
-│   ├── dataset_generation.py   # Bedrock-powered sample generator
+│   ├── critic_agent.py         # Critic LLM evaluation functions
+│   ├── dataset_generation.py   # Sample generator
 │   └── utils.py                # Logger helper
 └── agents/
     ├── schemas.py              # All shared TypedDicts (locked — don't rename keys)
     ├── orchestrator.py         # OrchestratorAgent class
     ├── critic.py               # CriticAgent adapter class
     ├── curriculum.py           # CurriculumAgent class
-    ├── logging_utils.py        # AgentEventLogger (writes JSONL for P3 dashboard)
+    ├── logging_utils.py        # AgentEventLogger (writes JSONL for dashboard)
     ├── pipeline_loop.py        # run_agentic_loop() — wires everything together
     └── tests/
-        ├── test_orchestrator.py    # 19 unit tests
-        ├── test_curriculum.py      # 7 unit tests
-        └── test_pipeline_e2e.py    # 5 end-to-end tests
+        ├── test_orchestrator.py
+        ├── test_curriculum.py
+        └── test_pipeline_e2e.py
 ```
 
 ---
@@ -149,113 +129,80 @@ modifai/
 ## Quick Start
 
 ### Prerequisites
-- Python 3.8+
-- AWS credentials with Bedrock access in `us-east-1`
-- `pip install boto3 pytest`
+- Python 3.12+
+- AWS credentials with access to S3, Secrets Manager, and Bedrock (`ap-south-1`)
+- [AWS SAM CLI](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/install-sam-cli.html)
+- OpenRouter API key stored in Secrets Manager as `modifai/or`
 
-### 1. Clone and install
+### 1. Clone and install dependencies
 
 ```bash
 git clone <repo-url>
 cd <repo>
-pip install boto3 pytest
+pip install boto3 requests PyPDF2 pytest
 ```
 
 ### 2. Configure AWS credentials
 
-```bash
-# Option A — AWS CLI (recommended)
-aws configure
-# Enter your AWS Access Key ID, Secret, and set region to us-east-1
-
-# Option B — Environment variables
-export AWS_ACCESS_KEY_ID=your_key
-export AWS_SECRET_ACCESS_KEY=your_secret
-export AWS_REGION=us-east-1
+**On Windows (PowerShell):**
+```powershell
+$env:AWS_ACCESS_KEY_ID="your_access_key"
+$env:AWS_SECRET_ACCESS_KEY="your_secret_key"
+$env:AWS_REGION="ap-south-1"
 ```
 
-> **Important:** Bedrock must be enabled in `us-east-1`. Model required: `amazon.nova-micro-v1:0`
+**On Mac/Linux:**
+```bash
+export AWS_ACCESS_KEY_ID="your_access_key"
+export AWS_SECRET_ACCESS_KEY="your_secret_key"
+export AWS_REGION="ap-south-1"
+```
 
-### 3. Run the unit tests (no AWS needed)
+### 3. Store the OpenRouter API key in Secrets Manager
+
+The secret must already exist at `modifai/or` with this exact JSON structure:
+```json
+{"api_key": "sk-or-v1-..."}
+```
+
+For local testing only, you can bypass Secrets Manager with:
+```bash
+export OPENROUTER_API_KEY="sk-or-v1-..."
+```
+
+### 4. Deploy with SAM
+
+```bash
+cd "5 lambda"
+sam build
+sam deploy --guided
+# Environment: dev | staging | prod
+```
+
+### 5. Run the unit tests (no AWS needed)
 
 ```bash
 python -m pytest modifai/agents/tests/ -v
 ```
 
-Expected: **31 passed** in under 1 second. All AWS calls are mocked — no credits spent.
-
-### 4. Run the smoke test (real AWS, ~1-3 minutes)
-
-```bash
-python smoke_test.py
-```
-
-Expected output:
-```
-Exit reason:   threshold_met   ← quality hit the bar
-Iterations:    1               ← done in one pass
-Final samples: 12              ← 12 clean training samples
-Accept pct:    91.7%
-Events logged: 2
-Smoke test PASSED [OK]
-```
-
 ---
 
-## Using the Pipeline in Your Code
+## Environment Variables
 
-```python
-from modifai.agents.pipeline_loop import run_agentic_loop
+All Lambda functions inherit these globals from `template.yaml`:
 
-# Your document chunks (list of text strings)
-chunks = [
-    "Chunk 1 text...",
-    "Chunk 2 text...",
-    # ...
-]
-
-state = run_agentic_loop(
-    goal="Build a Q&A bot for our HR policy documents",
-    doc_metadata={
-        "filename": "hr_policy.pdf",
-        "page_count": 30,
-        "domain": "HR policy",
-        "estimated_chunk_count": len(chunks),
-    },
-    chunks=chunks,
-    max_iterations=3,              # how many Critic→Curriculum loops to allow
-    event_log_path="events.jsonl", # P3 dashboard reads this file
-    region="us-east-1",
-)
-
-# Use the results
-print(state["exit_reason"])        # "threshold_met" | "max_iterations" | "all_accepted_first_pass"
-print(state["final_samples"])      # list of {instruction, input, output, chunk_id}
-print(state["final_stats"])        # {total, accepted, rewritten, rejected, accept_pct}
-print(state["events"])             # list of agent decision events (for P3 dashboard)
-```
-
-### Output: `final_samples` format
-
-```json
-[
-  {
-    "instruction": "What is step 2 of the ticket process?",
-    "input": "Step 1: Open the portal. Step 2: Click on Tickets...",
-    "output": "Step 2 is to click on Tickets in the support portal.",
-    "chunk_id": 0
-  }
-]
-```
-
-### Output: `events` format (for P3 dashboard JSONL)
-
-```json
-{"event_id": "uuid", "timestamp": "2026-06-09T07:18:17Z", "agent": "orchestrator",
- "iteration": 0, "decision": "intent=QA, threshold=0.85, spc=4", ...}
-{"event_id": "uuid", "timestamp": "2026-06-09T07:18:36Z", "agent": "critic",
- "iteration": 1, "decision": "accepted=11/12 (91.7%)...", ...}
-```
+| Variable | Default | Description |
+|---|---|---|
+| `OR_SECRET_NAME` | `modifai/or` | Secrets Manager secret for OpenRouter key |
+| `OR_MODEL` | `deepseek/deepseek-chat-v3` | Primary LLM model |
+| `OR_MAX_RETRIES` | `3` | Retry attempts per model before falling back |
+| `OR_RETRY_DELAY` | `1.5` | Base retry delay in seconds (exponential back-off) |
+| `S3_BUCKET` | _(auto)_ | Pipeline bucket for chunks, samples, manifests |
+| `JOB_MANIFEST_PREFIX` | `modifai-jobs` | S3 prefix for job manifests |
+| `DEMO_MODE` | `false` | `true` = simulate job status via LLM (no real training backend) |
+| `QUALITY_THRESHOLD` | `0.85` | Minimum weighted score to approve deployment |
+| `MAX_TUNING_ATTEMPTS` | `3` | Max hyperparameter tuning iterations |
+| `BASE_MODEL` | `meta.llama3-8b-instruct-v1:0` | Bedrock base model for fine-tuning |
 
 ---
 
@@ -266,8 +213,8 @@ print(state["events"])             # list of agent decision events (for P3 dashb
 feature/<your-name>/<what-youre-adding>
 # Examples:
 feature/riya/pdf-chunking
-feature/arjun/p3-dashboard
-feature/lakshya/bedrock-finetuning
+feature/arjun/dashboard
+feature/lakshya/openrouter-migration
 ```
 
 ### Before pushing
@@ -277,45 +224,10 @@ python -m pytest modifai/agents/tests/ -v
 ```
 
 ### What NOT to change without a team sync
-- Field names in `modifai/agents/schemas.py` — P2 (infra) and P3 (dashboard) depend on these exact keys
+- Field names in `modifai/agents/schemas.py` — dashboard depends on these exact keys
 - `modifai/core/critic_agent.py` — the critic implementation is locked (owned by teammate)
 - The `run_agentic_loop()` function signature — other services call this
-
-### Adding new tests
-Put them in `modifai/agents/tests/`. Mock all AWS calls using `@patch("modifai.agents.pipeline_loop.CriticAgent")`.
-
----
-
-## What Teammates Need to Test
-
-| What | What they need |
-|---|---|
-| **Unit tests only** (no AWS) | Python 3.8+, `pip install pytest boto3`, clone the repo |
-| **Smoke test** (real pipeline) | Above + AWS credentials with Bedrock access in `us-east-1` |
-| **P3 dashboard integration** | The `smoke_events.jsonl` file (generated by running smoke test) |
-
-### Sharing AWS credentials (for testing only)
-If a teammate doesn't have their own AWS account, you don't need to create IAM users. Since this is a hackathon, you can simply share your own credentials securely:
-
-1. Copy your `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`
-2. Send them to your teammates via a secure channel (e.g., Slack DM, Discord)
-3. Tell your teammates to set them in their terminal before running the smoke test:
-
-**On Windows (PowerShell):**
-```powershell
-$env:AWS_ACCESS_KEY_ID="your_access_key"
-$env:AWS_SECRET_ACCESS_KEY="your_secret_key"
-$env:AWS_REGION="us-east-1"
-```
-
-**On Mac/Linux:**
-```bash
-export AWS_ACCESS_KEY_ID="your_access_key"
-export AWS_SECRET_ACCESS_KEY="your_secret_key"
-export AWS_REGION="us-east-1"
-```
-
-> ⚠️ **Security Note:** Never commit these keys to GitHub. The `.gitignore` file is already set up to ignore `.env` and `.credentials` files.
+- The `llm_helper.py` public API (`call_llm`, `call_llm_json`) — all 8 Lambdas depend on it
 
 ---
 
@@ -323,21 +235,12 @@ export AWS_REGION="us-east-1"
 
 | Decision | Why |
 |---|---|
-| Bedrock region: `us-east-1` | Only confirmed region for `amazon.nova-micro-v1:0` |
-| CriticAgent is an adapter class | Wraps the teammate's function-based implementation without modifying it |
-| `accept_pct` counts only pure accepts | Rewrites indicate the generator still needs curriculum feedback |
-| Events written to JSONL | P3 dashboard polls this file for real-time updates |
-| All TypedDicts locked in `schemas.py` | P2 infrastructure depends on these exact field names |
-
----
-
-## AWS Model Used
-
-| Model | ID | Cost |
-|---|---|---|
-| Amazon Nova Micro | `amazon.nova-micro-v1:0` | Very low — text-only, fastest Nova model |
-
-Estimated cost for one `smoke_test.py` run: **< $0.01**
+| OpenRouter instead of Gemini | Gemini free tier hit 429 rate limits; OpenRouter gives multi-model fallback flexibility |
+| Model fallback chain | Ensures pipeline never crashes from a single model being rate-limited |
+| `llm_helper.py` as single LLM entry point | One place to swap providers, add logging, or change retry logic |
+| `requests` instead of Gemini SDK | OpenRouter is OpenAI-compatible — no heavyweight SDK needed |
+| Secrets Manager for API key | Key never touches env vars in production; IAM controls access |
+| `DEMO_MODE` | Lets the pipeline run end-to-end without a real training backend |
 
 ---
 
@@ -345,10 +248,10 @@ Estimated cost for one `smoke_test.py` run: **< $0.01**
 
 | Person | Component |
 |---|---|
-| Lakshya | Orchestrator Agent, Pipeline Loop, Integration |
+| Lakshya | Orchestrator Agent, Pipeline Loop, Lambda Integration, OpenRouter Migration |
 | [Teammate] | Critic Agent (core evaluation logic) |
 | [Teammate] | Curriculum Agent |
-| [Teammate] | P3 Dashboard / Frontend |
+| [Teammate] | Dashboard / Frontend |
 
 ---
 

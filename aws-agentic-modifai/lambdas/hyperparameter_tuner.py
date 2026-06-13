@@ -1,8 +1,8 @@
 """
 hyperparameter_tuner.py — Lambda: decide whether to deploy or tune further.
 
-Uses Gemini to suggest improved hyperparameters when the model doesn't yet
-meet the quality threshold.  No Amazon Bedrock dependency.
+Uses an LLM via OpenRouter to suggest improved hyperparameters when the
+model doesn't yet meet the quality threshold.  No Amazon Bedrock dependency.
 
 Weighted quality score
 ----------------------
@@ -21,16 +21,16 @@ QUALITY_THRESHOLD   Minimum weighted score to approve deployment (default: 0.85)
 MAX_TUNING_ATTEMPTS Maximum tune iterations before giving up     (default: 3)
 METRIC_WEIGHT       Weight for training-metrics score            (default: 0.4)
 TEST_WEIGHT         Weight for test-prompts score                (default: 0.6)
-GEMINI_API_KEY      Gemini API key  (or use Secrets Manager)
-GEMINI_SECRET_NAME  Secrets Manager secret (default: modifai/gemini)
-GEMINI_MODEL        Gemini model ID (default: gemini-2.0-flash)
+OPENROUTER_API_KEY  OpenRouter API key  (or use Secrets Manager)
+OR_SECRET_NAME      Secrets Manager secret (default: modifai/or)
+OR_MODEL            OpenRouter model ID (default: deepseek/deepseek-chat-v3)
 """
 
 import json
 import logging
 import os
 
-from gemini_helper import call_gemini_json
+from llm_helper import call_llm_json
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -110,7 +110,7 @@ def lambda_handler(event: dict, context) -> dict:
             ),
         }
 
-    # ── ask Gemini for better hyperparameters ─────────────────────────────────
+    # ── ask LLM for better hyperparameters ─────────────────────────────────
     current_hp = event.get("job_info", {}).get("hyperparameters", {})
     prompt = (
         f"Current hyperparameters: {json.dumps(current_hp)}\n"
@@ -121,22 +121,22 @@ def lambda_handler(event: dict, context) -> dict:
         "Suggest hyperparameter changes to improve the weighted score."
     )
     try:
-        suggestion      = call_gemini_json(prompt=prompt, system=_SYSTEM_PROMPT)
+        suggestion      = call_llm_json(prompt=prompt, system=_SYSTEM_PROMPT)
         new_hp          = {
             "epochs":        int(suggestion.get("epochs",        current_hp.get("epochs", 2))),
             "batch_size":    int(suggestion.get("batch_size",    current_hp.get("batch_size", 8))),
             "learning_rate": float(suggestion.get("learning_rate", current_hp.get("learning_rate", 0.00005))),
         }
         rationale = suggestion.get("rationale", "")
-        logger.info("Gemini suggested hyperparameters: %s | rationale: %s", new_hp, rationale)
+        logger.info("LLM suggested hyperparameters: %s | rationale: %s", new_hp, rationale)
     except Exception as exc:  # noqa: BLE001
-        logger.error("Gemini HP suggestion failed — incrementing epochs: %s", exc)
+        logger.error("LLM HP suggestion failed — incrementing epochs: %s", exc)
         new_hp    = {
             "epochs":        current_hp.get("epochs", 2) + 1,
             "batch_size":    current_hp.get("batch_size", 8),
             "learning_rate": current_hp.get("learning_rate", 0.00005),
         }
-        rationale = "Fallback: incremented epochs due to Gemini error."
+        rationale = "Fallback: incremented epochs due to LLM error."
 
     return {
         "action":              "tune",

@@ -2,7 +2,7 @@ import json
 import boto3
 import os
 
-from gemini_helper import call_gemini
+from llm_helper import call_llm
 
 s3 = boto3.client('s3')
 
@@ -34,7 +34,7 @@ def lambda_handler(event, context):
     if not all_samples:
         return {"action": "proceed", "training_data_uri": None, "score": 1.0}
 
-    # ── Gemini Critic evaluation ──────────────────────────────────────────────
+    # ── LLM Critic evaluation ─────────────────────────────────────────────────
     sample_preview = json.dumps(all_samples[:5], indent=2)
 
     system_prompt = (
@@ -51,17 +51,17 @@ def lambda_handler(event, context):
     )
 
     try:
-        raw = call_gemini(prompt=prompt, system=system_prompt, model="gemini-2.0-flash")
+        raw = call_llm(prompt=prompt, system=system_prompt)
         raw = raw.strip().strip("`").replace("json\n", "").strip()
         evaluation = json.loads(raw)
         dataset_score = float(evaluation.get("score", 0.9))
         action = evaluation.get("action", "proceed")
         reason = evaluation.get("reason", "")
     except Exception as e:
-        print(f"Gemini evaluation failed, defaulting to proceed: {e}")
+        print(f"LLM evaluation failed, defaulting to proceed: {e}")
         dataset_score = 0.9
         action = "proceed"
-        reason = "Gemini evaluation unavailable — defaulting to proceed."
+        reason = "LLM evaluation unavailable — defaulting to proceed."
 
     if action == "regenerate":
         return {

@@ -5,7 +5,7 @@ import uuid
 import io
 import PyPDF2
 
-from gemini_helper import call_gemini
+from llm_helper import call_llm
 
 s3 = boto3.client('s3')
 
@@ -42,12 +42,12 @@ def chunk_text(text: str, target_words: int = 384, overlap_words: int = 48) -> l
     return chunks
 
 
-# ── Gemini-powered semantic chunking strategy ─────────────────────────────────
+# ── LLM-powered semantic chunking strategy ────────────────────────────────────
 
 def get_chunking_strategy(strategy_event: dict) -> dict:
     """
     Use the strategy passed from IntentAnalyzer.
-    Falls back to Gemini if chunking params are missing.
+    Falls back to the LLM if chunking params are missing.
     """
     chunking = strategy_event.get("chunking", {})
     max_tokens = chunking.get("max_tokens")
@@ -56,7 +56,7 @@ def get_chunking_strategy(strategy_event: dict) -> dict:
     if max_tokens and overlap:
         return {"max_tokens": int(max_tokens), "overlap": int(overlap)}
 
-    # Fallback: ask Gemini for a sensible chunking strategy
+    # Fallback: ask LLM for a sensible chunking strategy
     try:
         intent = strategy_event.get("intent", "QA")
         prompt = (
@@ -64,7 +64,7 @@ def get_chunking_strategy(strategy_event: dict) -> dict:
             "Return ONLY JSON: {\"max_tokens\": <int>, \"overlap\": <int>}. "
             "max_tokens should be 256-1024, overlap should be 32-128."
         )
-        raw = call_gemini(prompt=prompt, model="gemini-2.0-flash")
+        raw = call_llm(prompt=prompt)
         raw = raw.strip().strip("`").replace("json\n", "").strip()
         result = json.loads(raw)
         return {
@@ -72,7 +72,7 @@ def get_chunking_strategy(strategy_event: dict) -> dict:
             "overlap":    int(result.get("overlap", 64))
         }
     except Exception as e:
-        print(f"Gemini chunking strategy failed, using defaults: {e}")
+        print(f"LLM chunking strategy failed, using defaults: {e}")
         return {"max_tokens": 512, "overlap": 64}
 
 
