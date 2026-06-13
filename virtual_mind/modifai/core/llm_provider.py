@@ -220,18 +220,18 @@ class GeminiProvider(BaseLLMProvider):
 
 class OpenRouterProvider(BaseLLMProvider):
     def __init__(self, model_id: Optional[str] = None, api_key: Optional[str] = None):
-        import requests
         self.api_key = api_key or os.environ.get("OPENROUTER_API_KEY")
         if not self.api_key:
             raise ValueError("OPENROUTER_API_KEY must be set to use OpenRouterProvider")
             
         env_model = os.environ.get("OPENROUTER_MODEL")
-        self.primary_model = model_id or env_model or "deepseek/deepseek-chat-v3"
+        self.primary_model = model_id or env_model or "openrouter/free"
         
         self.fallback_models = [
-            "deepseek/deepseek-chat-v3",
-            "qwen/qwen3-235b-a22b",
-            "google/gemini-2.5-flash-lite"
+            "openrouter/free",
+            "meta-llama/llama-3.3-70b-instruct:free",
+            "qwen/qwen3-coder:free",
+            "deepseek/deepseek-r1:free"
         ]
         
     def generate(
@@ -243,40 +243,33 @@ class OpenRouterProvider(BaseLLMProvider):
         return_raw: bool = False,
         **kwargs,
     ) -> Any:
-        
         import requests
         
         system_instruction = system_prompt
         if response_schema:
-            schema_str = json.dumps(response_schema, indent=2)
-            system_instruction += (
-                f"\n\nIMPORTANT: You MUST output a raw JSON object matching "
-                f"the following schema. DO NOT wrap the output in markdown blocks like ```json.\n"
-                f"{schema_str}"
-            )
+            system_instruction += "\n\nYou MUST respond only with raw JSON matching this schema:\n" + json.dumps(response_schema)
             
-        messages = [
-            {"role": "system", "content": system_instruction},
-            {"role": "user", "content": user_prompt}
-        ]
+        # Try primary model first, then fallbacks
+        models_to_try = [self.primary_model] + [m for m in self.fallback_models if m != self.primary_model]
         
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
-        }
-        
-        models_to_try = [self.primary_model]
-        for m in self.fallback_models:
-            if m not in models_to_try:
-                models_to_try.append(m)
-                
         last_error = None
         for current_model in models_to_try:
+            logger.info("Attempting generation via OpenRouter model: %s", current_model)
+            headers = {
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json"
+            }
+            
             payload = {
                 "model": current_model,
-                "messages": messages,
-                "temperature": kwargs.get("temperature", 0.1),
+                "messages": [
+                    {"role": "system", "content": system_instruction},
+                    {"role": "user", "content": user_prompt}
+                ]
             }
+            
+            if "temperature" in kwargs:
+                payload["temperature"] = kwargs["temperature"]
             if "max_tokens" in kwargs:
                 payload["max_tokens"] = kwargs["max_tokens"]
             if "top_p" in kwargs:
@@ -311,9 +304,9 @@ class OpenRouterProvider(BaseLLMProvider):
 def get_llm_provider() -> BaseLLMProvider:
     """
     Factory to return the configured LLM provider based on LLM_PROVIDER.
-    Defaults to gemini.
+    Defaults to openrouter.
     """
-    provider_type = os.environ.get("LLM_PROVIDER", "gemini").lower()
+    provider_type = os.environ.get("LLM_PROVIDER", "openrouter").lower()
     if provider_type == "bedrock":
         model_id = os.environ.get("AWS_MODEL_ID", "amazon.nova-micro-v1:0")
         region = os.environ.get("AWS_REGION", "us-east-1")
@@ -322,7 +315,7 @@ def get_llm_provider() -> BaseLLMProvider:
         model_id = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
         return GeminiProvider(model_id=model_id)
     elif provider_type == "openrouter":
-        model_id = os.environ.get("OPENROUTER_MODEL", "deepseek/deepseek-chat-v3")
+        model_id = os.environ.get("OPENROUTER_MODEL", "openrouter/free")
         return OpenRouterProvider(model_id=model_id)
     else:
         raise ValueError(f"Unknown LLM_PROVIDER: {provider_type}")

@@ -24,6 +24,9 @@ import {
     Timer,
     Settings2,
     Terminal,
+    Bot,
+    Zap,
+    Server,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -44,7 +47,7 @@ import PipelineTracker from '@/components/PipelineTracker'
 import { getStepsForMode } from '@/data/mockData'
 import { apiClient } from '@/api/client'
 
-const stepIconMap = { Upload, ScanText, Layers, Database, ShieldCheck, Brain, Rocket }
+const stepIconMap = { Upload, ScanText, Layers, Database, ShieldCheck, Brain, Rocket, Bot, Zap, Server }
 
 const statusConfig = {
     running: { label: 'Running', className: 'bg-blue-500/15 text-blue-400 border-blue-500/30', icon: Loader2 },
@@ -101,6 +104,21 @@ function buildStepSummary(stepName, data) {
             break
         case 'deployment':
             if (data.endpoint_url) lines.push(`🚀 Endpoint: ${data.endpoint_url}`)
+            break
+        case 'knowledge_extraction':
+            if (data.domains_found != null) lines.push(`🧠 ${data.domains_found} knowledge domains identified`)
+            if (data.workflows_found != null) lines.push(`📋 ${data.workflows_found} internal workflows mapped`)
+            break
+        case 'agent_discovery':
+            if (data.agents_discovered != null) lines.push(`🤖 ${data.agents_discovered} specialized agents discovered`)
+            if (data.roles?.length) data.roles.forEach(r => lines.push(`• ${r}`))
+            break
+        case 'automation_discovery':
+            if (data.automations_found != null) lines.push(`⚡ ${data.automations_found} n8n automations discovered`)
+            break
+        case 'agent_deployment':
+            if (data.deployed_agents != null) lines.push(`🚀 ${data.deployed_agents} agents deployed to FastAPI`)
+            if (data.endpoint_url) lines.push(`🌐 Base URL: ${data.endpoint_url}`)
             break
         default:
             // Generic: show any keys with values
@@ -199,10 +217,10 @@ export default function ProjectDetailPage() {
         const checkStatus = async () => {
             try {
                 const statusData = await apiClient.get(`projects/${id}/status`)
-                const rawStatus = statusData.pipeline_status || 'NOT_STARTED'
+                const rawStatus = statusData.status || statusData.pipeline_status || 'NOT_STARTED'
                 const normalizedStatus = rawStatus === 'COMPLETE' ? 'SUCCEEDED' : rawStatus
                 setPipelineStatus(normalizedStatus)
-                setProject(prev => ({ ...prev, status: statusData.project_status || prev.status }))
+                setProject(prev => ({ ...prev, status: statusData.status || statusData.project_status || prev.status }))
             } catch (err) {
                 console.error("Status error", err)
             }
@@ -292,7 +310,11 @@ export default function ProjectDetailPage() {
             'Collector': 'dataset_gen',
             'QualityControl': 'quality_control',
             'FineTuning': 'fine_tuning',
-            'Deployment': 'deployment'
+            'Deployment': 'deployment',
+            'KnowledgeExtraction': 'knowledge_extraction',
+            'AgentDiscovery': 'agent_discovery',
+            'AutomationDiscovery': 'automation_discovery',
+            'AgentDeployment': 'agent_deployment'
         }
 
         // Find the current active step index based on logs
@@ -668,6 +690,63 @@ export default function ProjectDetailPage() {
                                     </div>
                                 </div>
                             )}
+
+                            {/* Virtual Mind Agents */}
+                            {results.virtual_mind_agents && (
+                                <div className="rounded-lg border border-border bg-background p-4 space-y-3">
+                                    <div className="flex items-center gap-2 text-sm font-medium">
+                                        <Bot className="w-4 h-4 text-primary" />
+                                        Deployed Agents
+                                    </div>
+                                    <div className="space-y-2 max-h-[250px] overflow-y-auto custom-scrollbar">
+                                        {results.virtual_mind_agents.map((agent, i) => (
+                                            <div key={i} className="flex flex-col gap-2 text-xs border border-border/50 rounded-md p-2 bg-muted/20">
+                                                <div>
+                                                    <span className="font-semibold text-foreground block">{agent.name}</span>
+                                                    {agent.role && <span className="text-muted-foreground/80">{agent.role}</span>}
+                                                </div>
+                                                <Button
+                                                    size="sm"
+                                                    variant="secondary"
+                                                    className="w-full gap-1.5 h-7 text-[10px]"
+                                                    onClick={() => window.open(agent.endpoint || 'http://localhost:8000', '_blank')}
+                                                >
+                                                    <ExternalLink className="w-3 h-3" />
+                                                    Chat
+                                                </Button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Automations */}
+                            {results.virtual_mind_automations && (
+                                <div className="rounded-lg border border-border bg-background p-4 space-y-3">
+                                    <div className="flex items-center gap-2 text-sm font-medium">
+                                        <Zap className="w-4 h-4 text-primary" />
+                                        n8n Automations
+                                    </div>
+                                    <div className="space-y-2 max-h-[250px] overflow-y-auto custom-scrollbar">
+                                        {results.virtual_mind_automations.map((auto, i) => (
+                                            <div key={i} className="flex flex-col gap-2 text-xs border border-border/50 rounded-md p-2 bg-muted/20">
+                                                <div>
+                                                    <span className="font-semibold text-foreground block">{auto.name}</span>
+                                                </div>
+                                                <Button
+                                                    size="sm"
+                                                    variant="secondary"
+                                                    className="w-full gap-1.5 h-7 text-[10px]"
+                                                    onClick={() => window.open(results.n8n_url || 'http://localhost:5678', '_blank')}
+                                                >
+                                                    <ExternalLink className="w-3 h-3" />
+                                                    Deploy to n8n
+                                                </Button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
                         </div>
                     </CardContent>
                 </Card>
@@ -728,15 +807,15 @@ export default function ProjectDetailPage() {
             </div>
 
             {showLogs && (
-                <Card className="border-border bg-black/60 shadow-2xl overflow-hidden">
+                <Card className="border-border bg-slate-950 shadow-2xl overflow-hidden">
                     <CardContent className="p-0">
-                        <div className="bg-muted/50 px-4 py-2 border-b border-border flex items-center justify-between">
-                            <span className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest">System Events</span>
-                            <span className="text-[10px] font-mono text-muted-foreground">{logs.length} events logged</span>
+                        <div className="bg-slate-900 px-4 py-2 border-b border-slate-800 flex items-center justify-between">
+                            <span className="text-[10px] font-mono text-slate-400 uppercase tracking-widest">System Events</span>
+                            <span className="text-[10px] font-mono text-slate-400">{logs.length} events logged</span>
                         </div>
                         <div className="max-h-[350px] overflow-y-auto p-2 font-mono text-[11px] space-y-0.5 custom-scrollbar">
                             {logs.length === 0 ? (
-                                <div className="py-10 text-center text-muted-foreground italic">
+                                <div className="py-10 text-center text-slate-500 italic">
                                     Waiting for execution data...
                                 </div>
                             ) : (
@@ -748,12 +827,12 @@ export default function ProjectDetailPage() {
                                         error: 'text-red-400',
                                         success: 'text-emerald-400',
                                         running: 'text-blue-400',
-                                        info: 'text-muted-foreground'
+                                        info: 'text-slate-400'
                                     }
 
                                     return (
-                                        <div key={entry.id} className="group flex items-start gap-3 py-1 px-2 hover:bg-white/5 rounded transition-colors border-l-2 border-transparent hover:border-primary/30">
-                                            <span className="text-muted-foreground/50 shrink-0 tabular-nums">
+                                        <div key={entry.id} className="group flex items-start gap-3 py-1 px-2 hover:bg-slate-800/50 rounded transition-colors border-l-2 border-transparent hover:border-primary/30">
+                                            <span className="text-slate-500 shrink-0 tabular-nums">
                                                 {new Date(entry.timestamp).toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })}
                                             </span>
                                             <span className={`shrink-0 font-bold w-4 text-center ${statusColors[entry.status]}`}>
@@ -762,7 +841,7 @@ export default function ProjectDetailPage() {
                                             <div className="flex-1 min-w-0">
                                                 <p className={`font-semibold ${statusColors[entry.status]}`}>{entry.message}</p>
                                                 {entry.detail && (
-                                                    <p className="text-foreground/60 mt-0.5 line-clamp-1 group-hover:line-clamp-none transition-all">
+                                                    <p className="text-slate-300 mt-0.5 line-clamp-1 group-hover:line-clamp-none transition-all">
                                                         {entry.detail}
                                                     </p>
                                                 )}

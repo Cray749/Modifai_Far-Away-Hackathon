@@ -13,7 +13,9 @@ import {
     Loader2,
     ChevronRight,
     Server,
-    Layers
+    Layers,
+    Bot,
+    Zap
 } from 'lucide-react';
 import { apiClient } from '@/api/client';
 import BorderGlow from '@/components/ui/BorderGlow';
@@ -351,23 +353,35 @@ export default function DashboardPage() {
                     <h2 className="font-mono text-[12px] leading-[16px] uppercase text-mute tracking-widest mb-6">
                         Quick Start
                     </h2>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                         {[
                             {
                                 title: 'Generate Dataset',
-                                desc: 'Create training data from documents.',
+                                desc: 'Create training-ready datasets from documents.',
                                 icon: Database,
-                                mode: 'dataset'
+                                mode: 'dataset_only'
                             },
                             {
                                 title: 'Fine-Tune Model',
-                                desc: 'Train a specialized model.',
+                                desc: 'Build an AI model tailored to your domain.',
                                 icon: Brain,
-                                mode: 'finetune'
+                                mode: 'finetune_only'
+                            },
+                            {
+                                title: 'Deploy Agents',
+                                desc: 'Create specialized AI agents in minutes.',
+                                icon: Server,
+                                mode: 'deploy_agents'
+                            },
+                            {
+                                title: 'Generate Automations',
+                                desc: 'Transform processes into automated workflows.',
+                                icon: Zap,
+                                mode: 'generate_automations'
                             },
                             {
                                 title: 'Full Pipeline',
-                                desc: 'Documents to deployment.',
+                                desc: 'Build your complete AI ecosystem.',
                                 icon: Layers,
                                 mode: 'full'
                             }

@@ -21,7 +21,8 @@ import {
     Rocket,
     Brain,
     AlertCircle,
-    ChevronLeft
+    ChevronLeft,
+    Server
 } from 'lucide-react'
 import FileUploadZone from '@/components/FileUploadZone'
 import SpotlightCard from '@/components/ui/SpotlightCard'
@@ -32,27 +33,33 @@ import { extractTextSample, pickRandomFiles } from '@/utils/textExtractor'
 const MODES = [
     {
         value: 'dataset_only',
-        label: 'Dataset Only',
+        label: 'Generate Dataset',
         icon: Database,
-        desc: 'Generate a clean JSONL training dataset from your documents. No fine-tuning.',
+        desc: 'Create training-ready datasets from documents.',
     },
     {
         value: 'finetune_only',
-        label: 'Fine-Tune Only',
+        label: 'Fine-Tune Model',
         icon: Brain,
-        desc: 'Fine-tune a model on your existing JSONL dataset. Skip data generation.',
+        desc: 'Build an AI model tailored to your domain.',
     },
     {
-        value: 'dataset_and_finetune',
-        label: 'Dataset + Fine-Tune',
+        value: 'deploy_agents',
+        label: 'Deploy Agents',
+        icon: Server,
+        desc: 'Create specialized AI agents in minutes.',
+    },
+    {
+        value: 'generate_automations',
+        label: 'Generate Automations',
         icon: Zap,
-        desc: 'Generate a dataset from documents and then fine-tune a model on it.',
+        desc: 'Transform processes into automated workflows.',
     },
     {
         value: 'full',
         label: 'Full Pipeline',
-        icon: Rocket,
-        desc: 'End-to-end: generate dataset → fine-tune → deploy as API endpoint.',
+        icon: Layers,
+        desc: 'Build your complete AI ecosystem.',
     },
 ]
 
@@ -100,24 +107,27 @@ const MODELS = [
 
 // ── Dynamic Steps Based on Mode ───────────────────────────────────────────────
 function getSteps(mode) {
-    const includesDataset = mode !== 'finetune_only'
-    const includesFineTune = mode !== 'dataset_only'
+    const isVirtualMind = mode === 'deploy_agents' || mode === 'generate_automations'
+    const isFinetuneOnly = mode === 'finetune_only'
 
     const steps = [
         { id: 'mode', label: 'Pipeline Mode', icon: Layers },
     ]
 
-    if (includesDataset) {
+    if (!isFinetuneOnly) {
         steps.push({ id: 'intent', label: 'Intent', icon: Target })
     }
 
     steps.push({ id: 'upload', label: 'Upload Data', icon: Upload })
 
-    if (includesDataset) {
+    if (!isFinetuneOnly) {
         steps.push({ id: 'evaluate', label: 'Evaluate', icon: Sparkles })
     }
 
-    steps.push({ id: 'config', label: 'Configuration', icon: Settings2 })
+    if (!isVirtualMind) {
+        steps.push({ id: 'config', label: 'Configuration', icon: Settings2 })
+    }
+
     steps.push({ id: 'review', label: 'Review & Start', icon: CheckCircle2 })
 
     return steps
@@ -151,8 +161,10 @@ export default function NewProjectPage() {
     const steps = getSteps(mode)
     const currentStepId = steps[currentStep]?.id
 
-    const includesDataset = mode !== 'finetune_only'
-    const includesFineTune = mode !== 'dataset_only'
+    const isVirtualMind = mode === 'deploy_agents' || mode === 'generate_automations'
+    const requiresIntentAndEval = mode !== 'finetune_only'
+    const showDatasetConfig = mode === 'dataset_only' || mode === 'dataset_and_finetune' || mode === 'full'
+    const showFinetuneConfig = mode === 'finetune_only' || mode === 'dataset_and_finetune' || mode === 'full'
 
     const canProceed = () => {
         switch (currentStepId) {
@@ -199,7 +211,7 @@ export default function NewProjectPage() {
                     const text = await extractTextSample(fileObj.file)
                     previews.push(`[${fileObj.name}] ${text.substring(0, 100)}...`)
 
-                    const result = await apiClient.post('evaluate/', {
+                    const result = await apiClient.post('evaluate', {
                         text_sample: text,
                         intent: `${intent}: ${useCase}`,
                     })
@@ -240,16 +252,13 @@ export default function NewProjectPage() {
             setSubmitError(null)
 
             // 1. Create the project
-            const project = await apiClient.post('projects/', {
+            const project = await apiClient.post('projects', {
                 name,
                 description,
                 mode,
-                intent: includesDataset ? intent : null,
-                base_model: model,
-                config: {
-                    samples_per_chunk: samplesPerChunk,
-                    quality_threshold: qualityThreshold / 100,
-                },
+                intent: requiresIntentAndEval ? intent : null,
+                base_model: 'gpt-4o-mini',
+                config: {},
             })
 
             // 2. Upload files via presigned URLs
@@ -258,20 +267,22 @@ export default function NewProjectPage() {
                     `projects/${project.id}/upload-url?filename=${encodeURIComponent(fileObj.name)}`
                 )
 
-                const uploadResponse = await fetch(urlData.presigned_url, {
-                    method: 'PUT',
-                    body: fileObj.file,
-                    headers: { 'Content-Type': fileObj.type || 'application/octet-stream' },
-                })
-                if (!uploadResponse.ok) throw new Error(`Failed to upload ${fileObj.name} to S3`)
+                if (urlData.presigned_url === '/mock-upload-url') {
+                    await apiClient.put('/mock-upload-url', fileObj.file)
+                } else {
+                    const uploadResponse = await fetch(urlData.presigned_url, {
+                        method: 'PUT',
+                        body: fileObj.file,
+                        headers: { 'Content-Type': fileObj.type || 'application/octet-stream' },
+                    })
+                    if (!uploadResponse.ok) throw new Error(`Failed to upload ${fileObj.name}`)
+                }
             }
 
             // 3. Start the pipeline
             await apiClient.post(`projects/${project.id}/start`, {
                 config: {
-                    intent: includesDataset ? `${intent}: ${useCase}` : undefined,
-                    samples_per_chunk: samplesPerChunk,
-                    quality_threshold: qualityThreshold / 100,
+                    intent: requiresIntentAndEval ? `${intent}: ${useCase}` : undefined,
                 },
                 uploaded_filenames: files.map(f => f.name),
             })
@@ -631,72 +642,35 @@ export default function NewProjectPage() {
                     {currentStepId === 'config' && (
                         <div className="space-y-8 animate-in slide-in-from-right-8 duration-500">
                             <div className="space-y-1">
-                                <h2 className="text-[18px] font-semibold text-ink">Pipeline Configuration</h2>
-                                <p className="text-[14px] text-body">Configure how the pipeline processes your data</p>
+                                <h2 className="text-[18px] font-semibold text-ink">Pipeline Processing Overview</h2>
+                                <p className="text-[14px] text-body">Based on your uploaded documents, here is the projected pipeline execution plan.</p>
                             </div>
 
-                            <div className="space-y-8">
-                                {includesFineTune && (
-                                    <>
-                                        <div className="space-y-3">
-                                            <label className="block text-[14px] font-medium text-ink">Base Model</label>
-                                            <select 
-                                                value={model} 
-                                                onChange={(e) => setModel(e.target.value)}
-                                                className="w-full h-10 px-3 bg-canvas border border-hairline rounded-[6px] text-[14px] text-ink focus:outline-none focus:ring-1 focus:ring-[#171717] focus:border-ink appearance-none"
-                                                style={{ backgroundImage: `url("data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2224%22%20height%3D%2224%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%23171717%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpolyline%20points%3D%226%209%2012%2015%2018%209%22%3E%3C%2Fpolyline%3E%3C%2Fsvg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 12px center', backgroundSize: '16px' }}
-                                            >
-                                                {MODELS.map(m => (
-                                                    <option key={m.value} value={m.value}>{m.label} — {m.desc}</option>
-                                                ))}
-                                            </select>
+                            {(() => {
+                                const totalBytes = files.reduce((acc, f) => acc + (f.size || 0), 0);
+                                const estChars = Math.max(100, Math.floor(totalBytes / 2));
+                                const estChunks = Math.max(1, Math.ceil(estChars / 8000));
+                                const estMins = Math.max(1, Math.ceil(estChunks * 1.5));
+                                return (
+                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                        <div className="rounded-[8px] border border-hairline bg-canvas-soft p-5 space-y-2">
+                                            <p className="font-mono text-[10px] uppercase tracking-wider text-mute">Est. Chunks</p>
+                                            <p className="text-[24px] font-semibold text-ink">{estChunks}</p>
+                                            <p className="text-[12px] text-body">Dynamic chunks at ~8k chars</p>
                                         </div>
-                                        {includesDataset && <div className="w-full h-[1px] bg-hairline" />}
-                                    </>
-                                )}
-
-                                {includesDataset && (
-                                    <>
-                                        <div className="space-y-4">
-                                            <div className="flex items-center justify-between">
-                                                <label className="text-[14px] font-medium text-ink">Samples per Chunk</label>
-                                                <div className="font-mono text-[12px] bg-canvas-soft border border-hairline px-2 py-0.5 rounded-md text-ink">{samplesPerChunk}</div>
-                                            </div>
-                                            <input
-                                                type="range"
-                                                value={samplesPerChunk}
-                                                onChange={(e) => setSamplesPerChunk(parseInt(e.target.value))}
-                                                min={1} max={20} step={1}
-                                                className="w-full accent-[#171717]"
-                                                style={{ '--value': `${((samplesPerChunk - 1) / 19) * 100}%` }}
-                                            />
-                                            <p className="text-[14px] text-mute">
-                                                Number of synthetic training samples generated per text chunk.
-                                            </p>
+                                        <div className="rounded-[8px] border border-hairline bg-canvas-soft p-5 space-y-2">
+                                            <p className="font-mono text-[10px] uppercase tracking-wider text-mute">Samples / Chunk</p>
+                                            <p className="text-[24px] font-semibold text-ink">1-3</p>
+                                            <p className="text-[12px] text-body">Variable based on density</p>
                                         </div>
-
-                                        <div className="w-full h-[1px] bg-hairline" />
-
-                                        <div className="space-y-4">
-                                            <div className="flex items-center justify-between">
-                                                <label className="text-[14px] font-medium text-ink">Quality Threshold</label>
-                                                <div className="font-mono text-[12px] bg-canvas-soft border border-hairline px-2 py-0.5 rounded-md text-ink">{qualityThreshold}%</div>
-                                            </div>
-                                            <input
-                                                type="range"
-                                                value={qualityThreshold}
-                                                onChange={(e) => setQualityThreshold(parseInt(e.target.value))}
-                                                min={0} max={100} step={5}
-                                                className="w-full accent-[#171717]"
-                                                style={{ '--value': `${qualityThreshold}%` }}
-                                            />
-                                            <p className="text-[14px] text-mute">
-                                                Minimum confidence score. Higher = stricter quality, fewer samples.
-                                            </p>
+                                        <div className="rounded-[8px] border border-hairline bg-canvas-soft p-5 space-y-2">
+                                            <p className="font-mono text-[10px] uppercase tracking-wider text-mute">Est. Time</p>
+                                            <p className="text-[24px] font-semibold text-ink">~{estMins}m</p>
+                                            <p className="text-[12px] text-body">Pipeline completion time</p>
                                         </div>
-                                    </>
-                                )}
-                            </div>
+                                    </div>
+                                )
+                            })()}
                         </div>
                     )}
 
@@ -718,7 +692,7 @@ export default function NewProjectPage() {
                                     </div>
                                 </div>
 
-                                {includesDataset && intent && (
+                                {requiresIntentAndEval && intent && (
                                     <div className="rounded-[8px] border border-hairline bg-canvas-soft p-5 space-y-3">
                                         <p className="font-mono text-[10px] uppercase tracking-wider text-mute">Intent</p>
                                         <p className="text-[16px] font-medium text-ink">{INTENTS.find(i => i.value === intent)?.label}</p>
@@ -742,13 +716,18 @@ export default function NewProjectPage() {
                                 <div className="rounded-[8px] border border-hairline bg-canvas-soft p-5 space-y-4">
                                     <p className="font-mono text-[10px] uppercase tracking-wider text-mute">Configuration</p>
                                     <div className="grid grid-cols-2 sm:grid-cols-3 gap-6">
-                                        {includesFineTune && (
+                                        {isVirtualMind && (
+                                            <div className="col-span-full">
+                                                <p className="text-[14px] text-body">Auto-managed by Virtual Mind Orchestrator</p>
+                                            </div>
+                                        )}
+                                        {showFinetuneConfig && (
                                             <div>
                                                 <p className="text-[12px] text-mute mb-1">Base Model</p>
                                                 <p className="text-[14px] font-medium text-ink">{MODELS.find(m => m.value === model)?.label}</p>
                                             </div>
                                         )}
-                                        {includesDataset && (
+                                        {showDatasetConfig && (
                                             <>
                                                 <div>
                                                     <p className="text-[12px] text-mute mb-1">Samples/Chunk</p>
@@ -763,7 +742,7 @@ export default function NewProjectPage() {
                                     </div>
                                 </div>
 
-                                {includesDataset && evalScore !== null && (
+                                {requiresIntentAndEval && evalScore !== null && (
                                     <div className="rounded-[8px] border border-hairline bg-canvas-soft p-5 space-y-3">
                                         <p className="font-mono text-[10px] uppercase tracking-wider text-mute">Data Quality</p>
                                         <p className="text-[16px] font-medium text-ink">{Math.round(evalScore * 100)}% — {evalScore > 0.6 ? 'High Quality' : evalScore > 0.4 ? 'Acceptable' : 'Low Quality'}</p>
