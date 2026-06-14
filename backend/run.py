@@ -18,4 +18,5 @@ if __name__ == "__main__":
         port=settings.PORT,
         reload=True,
         log_level="info",
+        env_file=".env",
     )
