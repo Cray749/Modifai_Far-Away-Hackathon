@@ -266,17 +266,12 @@ export default function NewProjectPage() {
                 const urlData = await apiClient.post(
                     `projects/${project.id}/upload-url?filename=${encodeURIComponent(fileObj.name)}`
                 )
-
-                if (urlData.presigned_url === '/mock-upload-url') {
-                    await apiClient.put('/mock-upload-url', fileObj.file)
-                } else {
-                    const uploadResponse = await fetch(urlData.presigned_url, {
-                        method: 'PUT',
-                        body: fileObj.file,
-                        headers: { 'Content-Type': fileObj.type || 'application/octet-stream' },
-                    })
-                    if (!uploadResponse.ok) throw new Error(`Failed to upload ${fileObj.name}`)
-                }
+                const uploadResponse = await fetch(urlData.presigned_url, {
+                    method: 'PUT',
+                    body: fileObj.file,
+                    headers: { 'Content-Type': fileObj.type || 'application/octet-stream' },
+                })
+                if (!uploadResponse.ok) throw new Error(`Failed to upload ${fileObj.name}`)
             }
 
             // 3. Start the pipeline

@@ -25,6 +25,7 @@ export default function DashboardPage() {
     const navigate = useNavigate();
     const [projects, setProjects] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [timelineLogs, setTimelineLogs] = useState([]);
 
     useEffect(() => {
         const fetchProjects = async () => {
@@ -43,6 +44,39 @@ export default function DashboardPage() {
                     pipeline: [],
                 }));
                 setProjects(mapped);
+
+                // Fetch logs for the most recent project to populate timeline
+                if (mapped.length > 0) {
+                    const latestProj = mapped[0];
+                    try {
+                        const logsData = await apiClient.get(`projects/${latestProj.id}/logs`);
+                        const logs = logsData.logs || [];
+                        
+                        // Format for ActivityTimeline: { id, event, time, status }
+                        const formatted = logs
+                            .filter(log => !['PassStateEntered', 'PassStateExited', 'WaitStateEntered', 'WaitStateExited'].includes(log.type))
+                            .map((log, idx) => {
+                                let status = 'success';
+                                if (log.type.includes('Failed') || log.type.includes('Aborted') || log.type.includes('TimedOut')) status = 'error';
+                                else if (log.type.includes('Started') || log.type.includes('Entered')) status = 'running';
+
+                                const timeStr = new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                                const cleanLabel = log.label.replace('Entered: ', 'Starting ').replace('Exited: ', 'Finished ').replace(/_/g, ' ');
+
+                                return {
+                                    id: log.id || String(idx),
+                                    event: cleanLabel,
+                                    time: timeStr,
+                                    status: status
+                                };
+                            })
+                            .slice(0, 5); // top 5 most recent
+
+                        setTimelineLogs(formatted);
+                    } catch (logErr) {
+                        console.error('Failed to fetch timeline logs:', logErr);
+                    }
+                }
             } catch (err) {
                 console.error('Failed to fetch projects for dashboard:', err);
             } finally {
@@ -60,14 +94,6 @@ export default function DashboardPage() {
     };
 
     const recentProjects = projects.slice(0, 5);
-
-    // Timeline Mock Data for Section 5
-    const mockTimeline = [
-        { id: 1, event: 'Deployment Ready', time: '11:57 AM', status: 'success' },
-        { id: 2, event: 'Training Started', time: '11:48 AM', status: 'running' },
-        { id: 3, event: 'Dataset Generated', time: '11:46 AM', status: 'success' },
-        { id: 4, event: 'OCR Complete', time: '11:42 AM', status: 'success' },
-    ];
 
     const getStatusColor = (status) => {
         switch (status.toLowerCase()) {
@@ -344,7 +370,7 @@ export default function DashboardPage() {
                         <h2 className="font-mono text-[12px] leading-[16px] uppercase text-mute tracking-widest mb-6">
                             Activity
                         </h2>
-                        <ActivityTimeline items={mockTimeline} />
+                        <ActivityTimeline items={timelineLogs} />
                     </section>
                 </div>
 

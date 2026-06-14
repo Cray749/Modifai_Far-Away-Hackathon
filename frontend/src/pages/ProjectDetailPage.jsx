@@ -44,7 +44,7 @@ import {
     DialogClose,
 } from '@/components/ui/dialog'
 import PipelineTracker from '@/components/PipelineTracker'
-import { getStepsForMode } from '@/data/mockData'
+import { getStepsForMode } from '@/config/pipeline'
 import { apiClient } from '@/api/client'
 
 const stepIconMap = { Upload, ScanText, Layers, Database, ShieldCheck, Brain, Rocket, Bot, Zap, Server }
